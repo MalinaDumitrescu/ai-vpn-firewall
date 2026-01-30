@@ -1,0 +1,121 @@
+# ============================================================
+# Default configuration for VPN Firewall ML pipeline
+# ============================================================
+
+project:
+  name: vpn-firewall-ml
+  description: >
+    AI-based firewall for detecting and blocking encrypted VPN traffic
+    using an XGBoost + 1D CNN ensemble trained on flow metadata.
+  random_seed: 42
+
+dataset:
+  vnat:
+    h5_packets: data/raw/vnat/VNAT_Dataframe_release_1.h5
+    columns:
+      connection: connection
+      timestamps: timestamps
+      sizes: sizes
+      directions: directions
+      capture_id: file_names
+
+labels:
+  infer_from_filename: true
+  vpn_prefix: "vpn_"
+  nonvpn_prefix: "nonvpn_"
+  vpn_value: 1
+  nonvpn_value: 0
+
+# VNAT already provides connections (5-tuple) with packet lists per flow.
+flow:
+  source: vnat_h5_preextracted
+  five_tuple_format: [src_ip, src_port, dst_ip, dst_port, proto]
+
+window:
+  max_packets: 100
+  min_packets_runtime: 50
+  truncate_strategy: first
+  pad_value: 0.0
+
+direction:
+  source: vnat_flag
+  flag_values: [0, 1]
+  # For signed sizes: map VNAT flag 1 -> +, flag 0 -> -
+  signed_map:
+    "1": 1
+    "0": -1
+
+cnn:
+  input:
+    sequence_length: 100
+    channels: [signed_packet_size, inter_arrival_time]
+
+  normalization:
+    signed_packet_size:
+      transform: signed_log1p
+      standardize: true
+    inter_arrival_time:
+      transform: log1p
+      standardize: true
+    compute_stats_on: train_only
+
+  architecture:
+    conv_layers:
+      - filters: 32
+        kernel_size: 5
+        activation: relu
+      - filters: 64
+        kernel_size: 5
+        activation: relu
+    pooling: global_average
+    dense_layers:
+      - units: 64
+        activation: relu
+    output:
+      units: 1
+      activation: sigmoid
+
+  training:
+    optimizer: adam
+    loss: binary_crossentropy
+    batch_size: 256
+    max_epochs: 50
+    early_stopping:
+      monitor: val_loss
+      patience: 5
+      restore_best_weights: true
+
+xgboost:
+  objective: binary:logistic
+  eval_metric: logloss
+  max_depth: 6
+  learning_rate: 0.1
+  n_estimators: 500
+  subsample: 0.8
+  colsample_bytree: 0.8
+  early_stopping_rounds: 30
+
+  histogram_bins:
+    - [0, 99]
+    - [100, 299]
+    - [300, 599]
+    - [600, 899]
+    - [900, 1199]
+    - [1200, inf]
+
+split:
+  strategy: capture_based
+  train_ratio: 0.70
+  val_ratio: 0.15
+  test_ratio: 0.15
+
+ensemble:
+  method: weighted_average
+  weight_selection:
+    w_start: 0.0
+    w_end: 1.0
+    w_step: 0.05
+    optimize_metric: f1
+  threshold_selection:
+    strategy: max_recall_under_fpr
+    max_false_positive_rate: 0.01
