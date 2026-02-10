@@ -1,92 +1,55 @@
-# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
+*.egg-info/
 .eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
 wheels/
 pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# Virtual Environments
+.venv/
 venv/
 ENV/
 env/
-.venv
 
-# Jupyter Notebook
-.ipynb_checkpoints
-*.ipynb_checkpoints
-.jupyter
+.ipynb_checkpoints/
 jupyter_server_log.txt
+data/processed/vnat/flows.parquet
 
-# IDEs
+
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 .DS_Store
-*.sublime-project
-*.sublime-workspace
+Thumbs.db
 
-# VS Code
-.vscode/settings.json
-.vscode/launch.json
-
-# PyCharm
-.vscode/
-.idea/
-
-# Data (large files)
-data/raw/
+data/
 *.h5
 *.hdf5
-*.csv
+*.pcap
+*.pcapng
+*.parquet
 *.feather
+*.csv
 
-# Model artifacts
 artifacts/
-*.pt
-*.pth
+logs/
+output/
+outputs/
+*.log
 *.pkl
 *.joblib
-*.json
+*.pt
+*.pth
 *.npy
 *.npz
 
-# Logs and outputs
-logs/
-*.log
-output/
-outputs/
 
-# OS
-.DS_Store
-Thumbs.db
-*.swp
-
-# Temporary files
-.temp
-tmp/
-temp/
-*.tmp
-
-# Environment
-.env
-.env.local
