@@ -1,0 +1,22 @@
+project:
+  root: null
+
+data:
+  raw: "data/raw"
+  processed: "data/processed"
+  splits: "data/splits"
+
+  datasets:
+    vnat: "data/raw/vnat"
+    iscx: "data/raw/iscx"
+    captured: "data/raw/captured"
+
+artifacts:
+  root: "artifacts"
+  features: "artifacts/features"
+  xgb: "artifacts/xgb"
+  ensemble: "artifacts/ensemble"
+  eval: "artifacts/eval"
+
+demo:
+  logs: "artifacts/demo_logs"
