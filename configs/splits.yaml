@@ -1,0 +1,23 @@
+seed: 42
+
+ratios:
+  train: 0.70
+  val: 0.15
+  test: 0.15
+
+unit: "capture_id"
+
+stratify_by: "label"
+
+balance_by: "n_flows"
+
+min_captures_per_class:
+  train: 10
+  val: 5
+  test: 5
+
+outputs:
+  train_list: "data/splits/vnat_train_captures.txt"
+  val_list: "data/splits/vnat_val_captures.txt"
+  test_list: "data/splits/vnat_test_captures.txt"
+  manifest: "data/splits/vnat_split_manifest.json"
