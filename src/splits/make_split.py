@@ -242,12 +242,19 @@ def _rebalance_for_min_vpn_in_val_test(
     cap_map: Dict[str, Tuple[int, int]],
     min_val_vpn: int,
     min_test_vpn: int,
+    min_val_total: int,
+    min_test_total: int,
     seed: int,
 ) -> Dict[str, List[str]]:
     """
-    Ensure val/test have enough VPN flows for calibration/threshold selection.
-    Moves VPN-heavy captures from train -> val/test if needed.
-    Swaps NONVPN captures back (target_split -> train) to keep flow ratios sane.
+    Ensure:
+    - val/test have enough VPN flows (for calibration/threshold tuning)
+    - val/test have enough total flows (for stable estimates + close-ish ratios)
+
+    Moves captures while preserving capture-level separation.
+    Strategy:
+      1) If VPN too low: move VPN-heavy captures train -> target and swap NONVPN back.
+      2) If total too low: move NONVPN-heavy captures train -> target and swap SMALL captures back.
     """
     rng = np.random.default_rng(seed)
 
@@ -261,35 +268,38 @@ def _rebalance_for_min_vpn_in_val_test(
         nv.sort(key=lambda c: cap_map[c][1], reverse=True)
         return nv
 
+    def sort_smallest(ids: List[str]) -> List[str]:
+        tmp = list(ids)
+        tmp.sort(key=lambda c: cap_map[c][1])
+        return tmp
+
+    def stats(split_name: str) -> Dict[str, int]:
+        return _compute_split_flow_stats(cap_map, splits[split_name])
+
     for target_split, min_vpn in [("val", min_val_vpn), ("test", min_test_vpn)]:
         if min_vpn <= 0:
             continue
 
-        stats = _compute_split_flow_stats(cap_map, splits[target_split])
-        if stats["vpn"] >= min_vpn:
+        cur = stats(target_split)
+        if cur["vpn"] >= min_vpn:
             continue
 
-        need = min_vpn - stats["vpn"]
+        need = min_vpn - cur["vpn"]
 
         vpn_train = sort_vpn_desc(splits["train"])
         if not vpn_train:
             continue
 
         moved_vpn_mass = 0
-        moved_vpn = []
-
         for cid in vpn_train:
             splits["train"].remove(cid)
             splits[target_split].append(cid)
-            moved_vpn.append(cid)
             moved_vpn_mass += cap_map[cid][1]
             if moved_vpn_mass >= need:
                 break
 
-        # swap back nonvpn mass from target_split -> train
         nonvpn_target = sort_nonvpn_desc(splits[target_split])
         swapped_mass = 0
-
         for cid in nonvpn_target:
             splits[target_split].remove(cid)
             splits["train"].append(cid)
@@ -297,10 +307,45 @@ def _rebalance_for_min_vpn_in_val_test(
             if swapped_mass >= moved_vpn_mass:
                 break
 
+    for target_split, min_total in [("val", min_val_total), ("test", min_test_total)]:
+        if min_total <= 0:
+            continue
+
+        cur = stats(target_split)
+        if cur["total"] >= min_total:
+            continue
+
+        need = min_total - cur["total"]
+
+        nonvpn_train = sort_nonvpn_desc(splits["train"])
+        moved_mass = 0
+        moved = []
+
+        for cid in nonvpn_train:
+            splits["train"].remove(cid)
+            splits[target_split].append(cid)
+            moved.append(cid)
+            moved_mass += cap_map[cid][1]
+            if moved_mass >= need:
+                break
+
+        target_small = sort_smallest(splits[target_split])
+
+        swapped_mass = 0
+        for cid in target_small:
+            if cid in moved:
+                continue
+            splits[target_split].remove(cid)
+            splits["train"].append(cid)
+            swapped_mass += cap_map[cid][1]
+            if swapped_mass >= int(0.5 * moved_mass):
+                break
+
     rng.shuffle(splits["train"])
     rng.shuffle(splits["val"])
     rng.shuffle(splits["test"])
     return splits
+
 
 
 def make_vnat_capture_split(
@@ -385,29 +430,37 @@ def make_vnat_capture_split(
             final[split].extend(g_assign[split])
             final[split].extend(rem_assign[split])
 
-    # ---------------------------
-    # Post-fix: ensure enough VPN flows in val/test for calibration (optional)
-    # Read from splits.yaml without changing SplitConfig (simple & explicit).
+
     cfg_raw = yaml.safe_load(Path(splits_yaml).read_text(encoding="utf-8")) or {}
     vpn_min = cfg_raw.get("vpn_flow_min") or {}
     min_val_vpn = int(vpn_min.get("val", 0))
     min_test_vpn = int(vpn_min.get("test", 0))
+    tot_min = cfg_raw.get("min_total_flows") or {}
+    val_frac = float(tot_min.get("val_frac", 0.0))
+    test_frac = float(tot_min.get("test_frac", 0.0))
+    val_abs = int(tot_min.get("val_abs", 0))
+    test_abs = int(tot_min.get("test_abs", 0))
+
+    total_all = int(cap["n_flows"].sum())
+    min_val_total = max(val_abs, int(round(val_frac * total_all)))
+    min_test_total = max(test_abs, int(round(test_frac * total_all)))
 
     cap_map_all = {
         str(r["capture_id"]): (int(r["label"]), int(r["n_flows"]))
         for _, r in cap.iterrows()
     }
 
-    if min_val_vpn > 0 or min_test_vpn > 0:
+    if min_val_vpn > 0 or min_test_vpn > 0 or min_val_total > 0 or min_test_total > 0:
         final = _rebalance_for_min_vpn_in_val_test(
             splits=final,
             cap_map=cap_map_all,
             min_val_vpn=min_val_vpn,
             min_test_vpn=min_test_vpn,
+            min_val_total=min_val_total,
+            min_test_total=min_test_total,
             seed=cfg.seed + 999,
         )
 
-    # deterministic shuffle (final)
     rng = np.random.default_rng(cfg.seed)
     for split in ("train", "val", "test"):
         rng.shuffle(final[split])

@@ -13,9 +13,15 @@ flow_ratios:
   test: 0.15
 
 vpn_flow_min:
-  val: 60
+  val: 120
   test: 60
 
+min_total_flows:
+  val_frac: 0.13
+  test_frac: 0.13
+
+  val_abs: 0
+  test_abs: 0
 
 unit: "capture_id"
 stratify_by: "label"
@@ -27,11 +33,9 @@ min_captures_per_class:
   test: 5
 
 giants:
-  # take top-K largest captures per class and place them deliberately across splits
   top_k_per_class: 2
 
 tolerance:
-  # soft objective only (used for reporting, not strict stopping)
   abs_flow_ratio: 0.05
 
 outputs:
