@@ -76,10 +76,18 @@ def _load_cfg(repo_root: Path, cfg_path: Path) -> SplitConfig:
     abs_flow_ratio_tol = float(tol.get("abs_flow_ratio", 0.05))
 
     outputs = cfg.get("outputs") or {}
-    train_list_path = (repo_root / str(outputs.get("train_list", "data/splits/vnat_train_captures.txt"))).resolve()
-    val_list_path = (repo_root / str(outputs.get("val_list", "data/splits/vnat_val_captures.txt"))).resolve()
-    test_list_path = (repo_root / str(outputs.get("test_list", "data/splits/vnat_test_captures.txt"))).resolve()
-    manifest_path = (repo_root / str(outputs.get("manifest", "data/splits/vnat_split_manifest.json"))).resolve()
+    train_list_path = (
+        repo_root / str(outputs.get("train_list", "data/splits/vnat_train_captures.txt"))
+    ).resolve()
+    val_list_path = (
+        repo_root / str(outputs.get("val_list", "data/splits/vnat_val_captures.txt"))
+    ).resolve()
+    test_list_path = (
+        repo_root / str(outputs.get("test_list", "data/splits/vnat_test_captures.txt"))
+    ).resolve()
+    manifest_path = (
+        repo_root / str(outputs.get("manifest", "data/splits/vnat_split_manifest.json"))
+    ).resolve()
 
     return SplitConfig(
         seed=seed,
@@ -105,12 +113,14 @@ def _cap_targets(n_caps: int, train_r: float, val_r: float) -> Tuple[int, int, i
     train = int(round(n_caps * train_r))
     val = int(round(n_caps * val_r))
     test = n_caps - train - val
-    # safety for rounding
+
     if test < 0:
         test = 0
         val = n_caps - train
+
     if train + val + test != n_caps:
         test = n_caps - train - val
+
     return train, val, test
 
 
@@ -118,9 +128,11 @@ def _flow_targets(total_flows: int, train_r: float, val_r: float) -> Dict[str, i
     train = int(round(total_flows * train_r))
     val = int(round(total_flows * val_r))
     test = total_flows - train - val
+
     if test < 0:
         test = 0
         val = total_flows - train
+
     return {"train": train, "val": val, "test": test}
 
 
@@ -132,8 +144,7 @@ def _assign_giants_with_cap_limits(
 ) -> Dict[str, List[str]]:
     """
     Place giants first, respecting capture needs.
-    IMPORTANT: we choose the split that minimizes TOTAL error across all splits,
-    not only the chosen split's local error.
+    IMPORTANT: choose the split that minimizes TOTAL error across all splits.
     """
     rng = np.random.default_rng(seed)
     g = giants.sort_values("n_flows", ascending=False).reset_index(drop=True)
@@ -142,11 +153,10 @@ def _assign_giants_with_cap_limits(
     flows = {"train": 0, "val": 0, "test": 0}
 
     def global_score(chosen: str, w: int) -> int:
-        total = 0
-        for s in ("train", "val", "test"):
-            after = flows[s] + (w if s == chosen else 0)
-            total += abs(after - flow_targets[s])
-        return total
+        return sum(
+            abs((flows[s] + (w if s == chosen else 0)) - flow_targets[s])
+            for s in ("train", "val", "test")
+        )
 
     for _, row in g.iterrows():
         cid = str(row["capture_id"])
@@ -166,6 +176,7 @@ def _assign_giants_with_cap_limits(
             cap_need[chosen] -= 1
 
     return out
+
 
 def _assign_remaining_greedy(
     remaining: pd.DataFrame,
@@ -188,11 +199,10 @@ def _assign_remaining_greedy(
     flows = dict(already_flows)
 
     def global_score(chosen: str, w: int) -> int:
-        total = 0
-        for s in ("train", "val", "test"):
-            after = flows[s] + (w if s == chosen else 0)
-            total += abs(after - flow_targets[s])
-        return total
+        return sum(
+            abs((flows[s] + (w if s == chosen else 0)) - flow_targets[s])
+            for s in ("train", "val", "test")
+        )
 
     for _, row in rem.iterrows():
         cid = str(row["capture_id"])
@@ -212,6 +222,87 @@ def _assign_remaining_greedy(
 
     return out
 
+
+def _compute_split_flow_stats(cap_map: Dict[str, Tuple[int, int]], ids: List[str]) -> Dict[str, int]:
+    n_total = 0
+    n_vpn = 0
+    n_nonvpn = 0
+    for cid in ids:
+        y, n = cap_map[cid]
+        n_total += n
+        if y == 1:
+            n_vpn += n
+        else:
+            n_nonvpn += n
+    return {"total": n_total, "vpn": n_vpn, "nonvpn": n_nonvpn}
+
+
+def _rebalance_for_min_vpn_in_val_test(
+    splits: Dict[str, List[str]],
+    cap_map: Dict[str, Tuple[int, int]],
+    min_val_vpn: int,
+    min_test_vpn: int,
+    seed: int,
+) -> Dict[str, List[str]]:
+    """
+    Ensure val/test have enough VPN flows for calibration/threshold selection.
+    Moves VPN-heavy captures from train -> val/test if needed.
+    Swaps NONVPN captures back (target_split -> train) to keep flow ratios sane.
+    """
+    rng = np.random.default_rng(seed)
+
+    def sort_vpn_desc(ids: List[str]) -> List[str]:
+        vpn_caps = [cid for cid in ids if cap_map[cid][0] == 1]
+        vpn_caps.sort(key=lambda c: cap_map[c][1], reverse=True)
+        return vpn_caps
+
+    def sort_nonvpn_desc(ids: List[str]) -> List[str]:
+        nv = [cid for cid in ids if cap_map[cid][0] == 0]
+        nv.sort(key=lambda c: cap_map[c][1], reverse=True)
+        return nv
+
+    for target_split, min_vpn in [("val", min_val_vpn), ("test", min_test_vpn)]:
+        if min_vpn <= 0:
+            continue
+
+        stats = _compute_split_flow_stats(cap_map, splits[target_split])
+        if stats["vpn"] >= min_vpn:
+            continue
+
+        need = min_vpn - stats["vpn"]
+
+        vpn_train = sort_vpn_desc(splits["train"])
+        if not vpn_train:
+            continue
+
+        moved_vpn_mass = 0
+        moved_vpn = []
+
+        for cid in vpn_train:
+            splits["train"].remove(cid)
+            splits[target_split].append(cid)
+            moved_vpn.append(cid)
+            moved_vpn_mass += cap_map[cid][1]
+            if moved_vpn_mass >= need:
+                break
+
+        # swap back nonvpn mass from target_split -> train
+        nonvpn_target = sort_nonvpn_desc(splits[target_split])
+        swapped_mass = 0
+
+        for cid in nonvpn_target:
+            splits[target_split].remove(cid)
+            splits["train"].append(cid)
+            swapped_mass += cap_map[cid][1]
+            if swapped_mass >= moved_vpn_mass:
+                break
+
+    rng.shuffle(splits["train"])
+    rng.shuffle(splits["val"])
+    rng.shuffle(splits["test"])
+    return splits
+
+
 def make_vnat_capture_split(
     flows_parquet: Path,
     splits_yaml: Path,
@@ -223,20 +314,19 @@ def make_vnat_capture_split(
     if "capture_id" not in df.columns or "label" not in df.columns:
         raise ValueError("flows.parquet must contain capture_id and label columns")
 
-    # capture table
     cap = (
         df.groupby("capture_id")
         .agg(label=("label", "first"), n_flows=("label", "size"))
         .reset_index()
     )
 
-    # ensure constant label per capture
+    # sanity: constant label per capture
     check = df.groupby("capture_id")["label"].nunique()
     mixed = int((check > 1).sum())
     if mixed:
         raise ValueError(f"Found {mixed} captures with mixed labels. Fix labeling before splitting.")
 
-    final = {"train": [], "val": [], "test": []}
+    final: Dict[str, List[str]] = {"train": [], "val": [], "test": []}
 
     for y in [0, 1]:
         cap_y = cap[cap["label"] == y].copy().reset_index(drop=True)
@@ -244,11 +334,13 @@ def make_vnat_capture_split(
         if n_caps == 0:
             raise ValueError(f"No captures found for label={y}")
 
-        # capture count targets for this class
         n_train, n_val, n_test = _cap_targets(n_caps, cfg.cap_train_r, cfg.cap_val_r)
 
-        # enforce minimum captures per class per split
-        if n_train < cfg.min_train_per_class or n_val < cfg.min_val_per_class or n_test < cfg.min_test_per_class:
+        if (
+            n_train < cfg.min_train_per_class
+            or n_val < cfg.min_val_per_class
+            or n_test < cfg.min_test_per_class
+        ):
             raise ValueError(
                 f"Not enough captures for label={y} with requested ratios. "
                 f"Got train/val/test={n_train}/{n_val}/{n_test}, "
@@ -257,17 +349,14 @@ def make_vnat_capture_split(
 
         cap_need = {"train": n_train, "val": n_val, "test": n_test}
 
-        # flow targets (within this class)
         total_flows_y = int(cap_y["n_flows"].sum())
         flow_t = _flow_targets(total_flows_y, cfg.flow_train_r, cfg.flow_val_r)
 
-        # pick giants
         cap_y_sorted = cap_y.sort_values("n_flows", ascending=False).reset_index(drop=True)
         k = min(cfg.giants_top_k_per_class, len(cap_y_sorted))
         giants = cap_y_sorted.iloc[:k].copy()
         giant_ids = set(giants["capture_id"].astype(str).tolist())
 
-        # assign giants first with cap limits + flow objective
         g_assign = _assign_giants_with_cap_limits(
             giants=giants,
             cap_need=cap_need,
@@ -275,18 +364,15 @@ def make_vnat_capture_split(
             seed=cfg.seed + y * 1000,
         )
 
-        # current flows from giants
-        cap_map = cap_y.set_index("capture_id")["n_flows"].to_dict()
+        cap_flow_map = cap_y.set_index("capture_id")["n_flows"].to_dict()
         g_flows = {
-            "train": int(sum(cap_map[c] for c in g_assign["train"])),
-            "val": int(sum(cap_map[c] for c in g_assign["val"])),
-            "test": int(sum(cap_map[c] for c in g_assign["test"])),
+            "train": int(sum(cap_flow_map[c] for c in g_assign["train"])),
+            "val": int(sum(cap_flow_map[c] for c in g_assign["val"])),
+            "test": int(sum(cap_flow_map[c] for c in g_assign["test"])),
         }
 
-        # remaining captures
         rem = cap_y[~cap_y["capture_id"].astype(str).isin(giant_ids)].copy()
 
-        # assign remaining with hard cap limits
         rem_assign = _assign_remaining_greedy(
             remaining=rem,
             cap_need=cap_need,
@@ -295,12 +381,33 @@ def make_vnat_capture_split(
             seed=cfg.seed + y * 1000 + 77,
         )
 
-        # merge for this class
         for split in ("train", "val", "test"):
             final[split].extend(g_assign[split])
             final[split].extend(rem_assign[split])
 
-    # deterministic shuffle
+    # ---------------------------
+    # Post-fix: ensure enough VPN flows in val/test for calibration (optional)
+    # Read from splits.yaml without changing SplitConfig (simple & explicit).
+    cfg_raw = yaml.safe_load(Path(splits_yaml).read_text(encoding="utf-8")) or {}
+    vpn_min = cfg_raw.get("vpn_flow_min") or {}
+    min_val_vpn = int(vpn_min.get("val", 0))
+    min_test_vpn = int(vpn_min.get("test", 0))
+
+    cap_map_all = {
+        str(r["capture_id"]): (int(r["label"]), int(r["n_flows"]))
+        for _, r in cap.iterrows()
+    }
+
+    if min_val_vpn > 0 or min_test_vpn > 0:
+        final = _rebalance_for_min_vpn_in_val_test(
+            splits=final,
+            cap_map=cap_map_all,
+            min_val_vpn=min_val_vpn,
+            min_test_vpn=min_test_vpn,
+            seed=cfg.seed + 999,
+        )
+
+    # deterministic shuffle (final)
     rng = np.random.default_rng(cfg.seed)
     for split in ("train", "val", "test"):
         rng.shuffle(final[split])
@@ -322,7 +429,11 @@ def write_split_files(
     cfg.test_list_path.write_text("\n".join(splits["test"]) + "\n", encoding="utf-8")
 
     df = pd.read_parquet(flows_parquet, columns=["capture_id", "label"])
-    cap = df.groupby("capture_id").agg(label=("label", "first"), n_flows=("label", "size")).reset_index()
+    cap = (
+        df.groupby("capture_id")
+        .agg(label=("label", "first"), n_flows=("label", "size"))
+        .reset_index()
+    )
     cap_map = {str(r["capture_id"]): (int(r["label"]), int(r["n_flows"])) for _, r in cap.iterrows()}
 
     def split_stats(ids: List[str]) -> Dict[str, object]:
@@ -331,7 +442,10 @@ def write_split_files(
         return {
             "n_captures": int(len(ids)),
             "n_flows": int(sum(flows)),
-            "captures_by_label": {"0": int(sum(l == 0 for l in labels)), "1": int(sum(l == 1 for l in labels))},
+            "captures_by_label": {
+                "0": int(sum(l == 0 for l in labels)),
+                "1": int(sum(l == 1 for l in labels)),
+            },
             "flows_by_label": {
                 "0": int(sum(f for l, f in zip(labels, flows) if l == 0)),
                 "1": int(sum(f for l, f in zip(labels, flows) if l == 1)),
