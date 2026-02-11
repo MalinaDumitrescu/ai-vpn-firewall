@@ -12,6 +12,11 @@ flow_ratios:
   val: 0.15
   test: 0.15
 
+vpn_flow_min:
+  val: 60
+  test: 60
+
+
 unit: "capture_id"
 stratify_by: "label"
 balance_by: "n_flows"
