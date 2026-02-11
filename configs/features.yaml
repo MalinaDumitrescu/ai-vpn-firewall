@@ -1,0 +1,3 @@
+window:
+  N: 100
+  eps: 1e-6

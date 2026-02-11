@@ -59,6 +59,7 @@ def _load_yaml(path: Path) -> Dict[str, Any]:
 @dataclass(frozen=True)
 class ProjectPaths:
     repo_root: Path
+    configs_dir: Path
 
     data_raw: Path
     data_processed: Path
@@ -112,7 +113,7 @@ class ProjectPaths:
         Basic sanity checks to catch 'empty folders' issues early.
         """
         required = [
-            self.repo_root / "configs",
+            self.configs_dir,
             self.repo_root / "src",
             self.config_paths_yaml,
         ]
@@ -135,6 +136,8 @@ def load_paths(config_path: Optional[Path] = None) -> ProjectPaths:
     project_root_value = (cfg.get("project") or {}).get("root", None)
     if isinstance(project_root_value, str) and project_root_value.strip():
         repo_root = _resolve_path(repo_root, project_root_value)
+
+    configs_dir = repo_root / "configs"
 
     data_cfg = cfg.get("data") or {}
     art_cfg = cfg.get("artifacts") or {}
@@ -161,6 +164,7 @@ def load_paths(config_path: Optional[Path] = None) -> ProjectPaths:
 
     return ProjectPaths(
         repo_root=repo_root,
+        configs_dir=configs_dir,
         data_raw=data_raw,
         data_processed=data_processed,
         data_splits=data_splits,
@@ -183,6 +187,7 @@ if __name__ == "__main__":
     paths.validate_layout(require_raw=False)
 
     print("Repo root:", paths.repo_root)
+    print("Configs dir:", paths.configs_dir)
     print("Config:", paths.config_paths_yaml)
     print("data/raw:", paths.data_raw)
     print("data/raw/vnat:", paths.data_raw_vnat)
