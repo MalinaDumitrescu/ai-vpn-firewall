@@ -131,14 +131,22 @@ def _assign_giants_with_cap_limits(
     seed: int,
 ) -> Dict[str, List[str]]:
     """
-    Place giants first, but respect capture needs.
-    Choose split that best reduces flow-target error.
+    Place giants first, respecting capture needs.
+    IMPORTANT: we choose the split that minimizes TOTAL error across all splits,
+    not only the chosen split's local error.
     """
     rng = np.random.default_rng(seed)
     g = giants.sort_values("n_flows", ascending=False).reset_index(drop=True)
 
     out = {"train": [], "val": [], "test": []}
     flows = {"train": 0, "val": 0, "test": 0}
+
+    def global_score(chosen: str, w: int) -> int:
+        total = 0
+        for s in ("train", "val", "test"):
+            after = flows[s] + (w if s == chosen else 0)
+            total += abs(after - flow_targets[s])
+        return total
 
     for _, row in g.iterrows():
         cid = str(row["capture_id"])
@@ -148,11 +156,8 @@ def _assign_giants_with_cap_limits(
         if not eligible:
             eligible = ["train", "val", "test"]
 
-        def score(s: str) -> float:
-            return abs((flows[s] + w) - flow_targets[s])
-
-        best = min(score(s) for s in eligible)
-        cand = [s for s in eligible if score(s) == best]
+        best = min(global_score(s, w) for s in eligible)
+        cand = [s for s in eligible if global_score(s, w) == best]
         chosen = cand[int(rng.integers(0, len(cand)))]
 
         out[chosen].append(cid)
@@ -162,7 +167,6 @@ def _assign_giants_with_cap_limits(
 
     return out
 
-
 def _assign_remaining_greedy(
     remaining: pd.DataFrame,
     cap_need: Dict[str, int],
@@ -171,9 +175,8 @@ def _assign_remaining_greedy(
     seed: int,
 ) -> Dict[str, List[str]]:
     """
-    Greedy assignment with hard capture limits:
-    - assign largest remaining captures first
-    - choose split that minimizes absolute deviation from flow target after adding
+    Greedy assignment with HARD capture limits.
+    IMPORTANT: choose the split that minimizes TOTAL error across all splits.
     """
     rng = np.random.default_rng(seed)
 
@@ -184,20 +187,23 @@ def _assign_remaining_greedy(
     out = {"train": [], "val": [], "test": []}
     flows = dict(already_flows)
 
+    def global_score(chosen: str, w: int) -> int:
+        total = 0
+        for s in ("train", "val", "test"):
+            after = flows[s] + (w if s == chosen else 0)
+            total += abs(after - flow_targets[s])
+        return total
+
     for _, row in rem.iterrows():
         cid = str(row["capture_id"])
         w = int(row["n_flows"])
 
         eligible = [s for s in ("train", "val", "test") if cap_need[s] > 0]
         if not eligible:
-            # should not happen if counts are correct, but safe fallback
             eligible = ["train", "val", "test"]
 
-        def score(s: str) -> float:
-            return abs((flows[s] + w) - flow_targets[s])
-
-        best = min(score(s) for s in eligible)
-        cand = [s for s in eligible if score(s) == best]
+        best = min(global_score(s, w) for s in eligible)
+        cand = [s for s in eligible if global_score(s, w) == best]
         chosen = cand[int(rng.integers(0, len(cand)))]
 
         out[chosen].append(cid)
@@ -205,7 +211,6 @@ def _assign_remaining_greedy(
         cap_need[chosen] -= 1
 
     return out
-
 
 def make_vnat_capture_split(
     flows_parquet: Path,
