@@ -1,20 +1,35 @@
 seed: 42
 
-ratios:
+# desired overall distribution by FLOW MASS (not capture count)
+flow_ratios:
   train: 0.70
   val: 0.15
   test: 0.15
 
 unit: "capture_id"
-
 stratify_by: "label"
-
 balance_by: "n_flows"
 
+# safety: keep enough captures in each split per class
 min_captures_per_class:
   train: 10
   val: 5
   test: 5
+
+# GIANT HANDLING
+# captures with very large n_flows can dominate a split; distribute them explicitly
+giants:
+  # if >0, take top_k largest captures PER CLASS and place them across splits first
+  top_k_per_class: 2
+
+  # optional fallback: treat captures above this percentile as giants too
+  # (used only if top_k_per_class is 0)
+  percentile: 95
+
+# allowed deviation from target flow ratios during assignment
+tolerance:
+  # +/- this fraction of total flows (e.g., 0.03 means 3% absolute)
+  abs_flow_ratio: 0.03
 
 outputs:
   train_list: "data/splits/vnat_train_captures.txt"
