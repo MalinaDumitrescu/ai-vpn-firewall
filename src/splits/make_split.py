@@ -6,10 +6,15 @@ from typing import Dict, List, Tuple
 
 import hashlib
 import json
+
 import numpy as np
 import pandas as pd
 import yaml
 
+
+# ============================================================
+# Config
+# ============================================================
 
 @dataclass(frozen=True)
 class SplitConfig:
@@ -109,11 +114,16 @@ def _load_cfg(repo_root: Path, cfg_path: Path) -> SplitConfig:
     )
 
 
+# ============================================================
+# Helpers: targets
+# ============================================================
+
 def _cap_targets(n_caps: int, train_r: float, val_r: float) -> Tuple[int, int, int]:
     train = int(round(n_caps * train_r))
     val = int(round(n_caps * val_r))
     test = n_caps - train - val
 
+    # rounding safety
     if test < 0:
         test = 0
         val = n_caps - train
@@ -136,6 +146,10 @@ def _flow_targets(total_flows: int, train_r: float, val_r: float) -> Dict[str, i
     return {"train": train, "val": val, "test": test}
 
 
+# ============================================================
+# Assignment: per-class, capture-limited, flow-guided
+# ============================================================
+
 def _assign_giants_with_cap_limits(
     giants: pd.DataFrame,
     cap_need: Dict[str, int],
@@ -144,7 +158,7 @@ def _assign_giants_with_cap_limits(
 ) -> Dict[str, List[str]]:
     """
     Place giants first, respecting capture needs.
-    IMPORTANT: choose the split that minimizes TOTAL error across all splits.
+    Choose split that minimizes TOTAL abs error across all splits.
     """
     rng = np.random.default_rng(seed)
     g = giants.sort_values("n_flows", ascending=False).reset_index(drop=True)
@@ -172,8 +186,7 @@ def _assign_giants_with_cap_limits(
 
         out[chosen].append(cid)
         flows[chosen] += w
-        if cap_need[chosen] > 0:
-            cap_need[chosen] -= 1
+        cap_need[chosen] -= 1
 
     return out
 
@@ -187,7 +200,7 @@ def _assign_remaining_greedy(
 ) -> Dict[str, List[str]]:
     """
     Greedy assignment with HARD capture limits.
-    IMPORTANT: choose the split that minimizes TOTAL error across all splits.
+    Choose split that minimizes TOTAL abs error across all splits.
     """
     rng = np.random.default_rng(seed)
 
@@ -223,27 +236,18 @@ def _assign_remaining_greedy(
     return out
 
 
-def _compute_split_flow_stats(cap_map: Dict[str, Tuple[int, int]], ids: List[str]) -> Dict[str, int]:
-    n_total = 0
-    n_vpn = 0
-    n_nonvpn = 0
-    for cid in ids:
-        y, n = cap_map[cid]
-        n_total += n
-        if y == 1:
-            n_vpn += n
-        else:
-            n_nonvpn += n
-    return {"total": n_total, "vpn": n_vpn, "nonvpn": n_nonvpn}
+# ============================================================
+# Rebalance (SWAPS ONLY) to satisfy guardrails
+# ============================================================
 
-
-def _rebalance_for_min_vpn_in_val_test(
+def _rebalance_with_swaps_only(
     splits: Dict[str, List[str]],
-    cap_map: Dict[str, Tuple[int, int]],   # cid -> (label, n_flows)
+    cap_map: Dict[str, Tuple[int, int]],  # cid -> (label, n_flows)
+    *,
     min_val_vpn_flows: int,
     min_test_vpn_flows: int,
-    min_val_total: int,
-    min_test_total: int,
+    min_val_total_flows: int,
+    min_test_total_flows: int,
     min_val_vpn_caps: int,
     min_test_vpn_caps: int,
     keep_giants_in_train: bool,
@@ -251,13 +255,13 @@ def _rebalance_for_min_vpn_in_val_test(
     seed: int,
 ) -> Dict[str, List[str]]:
     """
-    Rebalance using SWAPS only (keeps capture counts fixed).
+    This must NEVER change split sizes.
+    It only swaps (train <-> val/test) to enforce:
+      - min VPN captures in val/test (optional)
+      - min VPN flow mass in val/test (optional)
+      - min total flow mass in val/test (optional)
 
-    Guardrails:
-      - optionally keep very large captures ("giants") in train
-      - enforce minimum VPN captures in val/test
-      - enforce minimum VPN flow mass in val/test
-      - enforce minimum total flow mass in val/test
+    Also: if keep_giants_in_train=True, never place captures with flows >= giant_flow_threshold into val/test.
     """
     rng = np.random.default_rng(seed)
 
@@ -279,14 +283,14 @@ def _rebalance_for_min_vpn_in_val_test(
     def stats(ids: List[str]) -> Dict[str, int]:
         total = sum(flows(c) for c in ids)
         vpn = sum(flows(c) for c in ids if is_vpn(c))
-        nonvpn = total - vpn
-        return {"total": total, "vpn": vpn, "nonvpn": nonvpn}
+        return {"total": total, "vpn": vpn}
 
-    def sorted_candidates(
+    def candidates(
         ids: List[str],
         pred,
-        desc: bool = True,
-        allow_giants: bool = True,
+        *,
+        desc: bool,
+        allow_giants: bool,
     ) -> List[str]:
         out = [c for c in ids if pred(c)]
         if not allow_giants:
@@ -300,63 +304,53 @@ def _rebalance_for_min_vpn_in_val_test(
         splits[a_split].append(b_cid)
         splits[b_split].append(a_cid)
 
-    for target_split, min_caps in [("val", min_val_vpn_caps), ("test", min_test_vpn_caps)]:
+    # --- 1) Min VPN CAPTURES in val/test ---
+    for target, min_caps in (("val", min_val_vpn_caps), ("test", min_test_vpn_caps)):
         if min_caps <= 0:
             continue
 
-        for _ in range(1000):
-            if vpn_cap_count(splits[target_split]) >= min_caps:
+        for _ in range(2000):
+            if vpn_cap_count(splits[target]) >= min_caps:
                 break
 
-            vpn_train = sorted_candidates(
-                splits["train"],
-                pred=is_vpn,
-                desc=True,
-                allow_giants=True,
-            )
+            # take a VPN from train (prefer large to help VPN flows too)
+            vpn_train = candidates(splits["train"], is_vpn, desc=True, allow_giants=True)
             if not vpn_train:
                 break
 
-            nonvpn_target = sorted_candidates(
-                splits[target_split],
-                pred=is_nonvpn,
-                desc=True,
-                allow_giants=False,
-            )
+            # swap out a NONVPN from target (prefer large to also help total constraints in train)
+            nonvpn_target = candidates(splits[target], is_nonvpn, desc=True, allow_giants=False)
             if not nonvpn_target:
-                nonvpn_target = sorted_candidates(
-                    splits[target_split],
-                    pred=is_vpn,
-                    desc=False,
-                    allow_giants=True,
-                )
-                if not nonvpn_target:
+                # if target is all VPN already, swap with smallest VPN (rare)
+                any_target = candidates(splits[target], lambda _: True, desc=False, allow_giants=False)
+                if not any_target:
                     break
+                b = any_target[0]
+            else:
+                b = nonvpn_target[0]
 
             a = vpn_train[0]
-            b = nonvpn_target[0]
 
+            # never push giants into val/test if requested
             if keep_giants_in_train and is_giant(a):
                 vpn_train = [c for c in vpn_train if not is_giant(c)]
                 if not vpn_train:
                     break
                 a = vpn_train[0]
 
-            do_swap("train", target_split, a, b)
+            do_swap("train", target, a, b)
 
-    for target_split, min_vpn_flows in [("val", min_val_vpn_flows), ("test", min_test_vpn_flows)]:
-        if min_vpn_flows <= 0:
+    # --- 2) Min VPN FLOWS in val/test ---
+    for target, min_vpn in (("val", min_val_vpn_flows), ("test", min_test_vpn_flows)):
+        if min_vpn <= 0:
             continue
 
-        for _ in range(1000):
-            cur = stats(splits[target_split])
-            if cur["vpn"] >= min_vpn_flows:
+        for _ in range(4000):
+            if stats(splits[target])["vpn"] >= min_vpn:
                 break
 
-            vpn_train = sorted_candidates(splits["train"], pred=is_vpn, desc=True, allow_giants=True)
-            nonvpn_target = sorted_candidates(
-                splits[target_split], pred=is_nonvpn, desc=True, allow_giants=False
-            )
+            vpn_train = candidates(splits["train"], is_vpn, desc=True, allow_giants=True)
+            nonvpn_target = candidates(splits[target], is_nonvpn, desc=True, allow_giants=False)
             if not vpn_train or not nonvpn_target:
                 break
 
@@ -369,51 +363,62 @@ def _rebalance_for_min_vpn_in_val_test(
                     break
                 a = vpn_train[0]
 
-            do_swap("train", target_split, a, b)
+            do_swap("train", target, a, b)
 
-    for target_split, min_total in [("val", min_val_total), ("test", min_test_total)]:
+    # --- 3) Min TOTAL FLOWS in val/test ---
+    for target, min_total in (("val", min_val_total_flows), ("test", min_test_total_flows)):
         if min_total <= 0:
             continue
 
-        for _ in range(2000):
-            cur = stats(splits[target_split])
-            if cur["total"] >= min_total:
+        for _ in range(8000):
+            if stats(splits[target])["total"] >= min_total:
                 break
 
-            nonvpn_train = sorted_candidates(
+            # bring a big NONVPN from train into target (but not a giant, if requested)
+            nonvpn_train = candidates(
                 splits["train"],
-                pred=is_nonvpn,
+                is_nonvpn,
                 desc=True,
-                allow_giants=not keep_giants_in_train,  # exclude giants if requested
+                allow_giants=not keep_giants_in_train,
             )
             if not nonvpn_train:
                 break
 
-            small_target = sorted_candidates(
-                splits[target_split],
-                pred=lambda _: True,
-                desc=False,
-                allow_giants=False,
-            )
+            # swap out the smallest capture from target back to train (never keep giants in val/test)
+            small_target = candidates(splits[target], lambda _: True, desc=False, allow_giants=False)
             if not small_target:
                 break
 
             a = nonvpn_train[0]
             b = small_target[0]
 
+            # never push giants into val/test if requested
             if keep_giants_in_train and is_giant(a):
                 nonvpn_train = [c for c in nonvpn_train if not is_giant(c)]
                 if not nonvpn_train:
                     break
                 a = nonvpn_train[0]
 
-            do_swap("train", target_split, a, b)
+            do_swap("train", target, a, b)
 
     rng.shuffle(splits["train"])
     rng.shuffle(splits["val"])
     rng.shuffle(splits["test"])
     return splits
 
+
+def _assert_split_sizes_unchanged(before: Dict[str, int], after: Dict[str, List[str]]) -> None:
+    for k in ("train", "val", "test"):
+        if len(after[k]) != before[k]:
+            raise RuntimeError(
+                f"BUG: rebalance changed split size for {k}: {before[k]} -> {len(after[k])}. "
+                f"Rebalance must use swaps only."
+            )
+
+
+# ============================================================
+# Public API
+# ============================================================
 
 def make_vnat_capture_split(
     flows_parquet: Path,
@@ -432,6 +437,7 @@ def make_vnat_capture_split(
         .reset_index()
     )
 
+    # constant label per capture
     check = df.groupby("capture_id")["label"].nunique()
     mixed = int((check > 1).sum())
     if mixed:
@@ -439,7 +445,8 @@ def make_vnat_capture_split(
 
     final: Dict[str, List[str]] = {"train": [], "val": [], "test": []}
 
-    for y in [0, 1]:
+    # stratify by label at CAPTURE level
+    for y in (0, 1):
         cap_y = cap[cap["label"] == y].copy().reset_index(drop=True)
         n_caps = len(cap_y)
         if n_caps == 0:
@@ -496,6 +503,7 @@ def make_vnat_capture_split(
             final[split].extend(g_assign[split])
             final[split].extend(rem_assign[split])
 
+    # ---- Guardrails from YAML (SWAPS ONLY) ----
     cfg_raw = yaml.safe_load(Path(splits_yaml).read_text(encoding="utf-8")) or {}
 
     vpn_min = cfg_raw.get("vpn_flow_min") or {}
@@ -508,37 +516,42 @@ def make_vnat_capture_split(
     val_abs = int(tot_min.get("val_abs", 0))
     test_abs = int(tot_min.get("test_abs", 0))
 
+    # These are safe defaults for VNAT-like distributions
+    # (prevents the exact failure mode you just saw: val/test collapsing to 1 giant nonvpn capture).
     guard = cfg_raw.get("guardrails") or {}
     keep_giants_in_train = bool(guard.get("keep_giants_in_train", True))
     giant_flow_threshold = int(guard.get("giant_flow_threshold", 5000))
     min_vpn_caps = guard.get("min_vpn_captures") or {}
-    min_val_vpn_caps = int(min_vpn_caps.get("val", 0))
-    min_test_vpn_caps = int(min_vpn_caps.get("test", 0))
+    # If you don't specify, default to your per-class minimum (so val/test still have enough VPN examples).
+    min_val_vpn_caps = int(min_vpn_caps.get("val", cfg.min_val_per_class))
+    min_test_vpn_caps = int(min_vpn_caps.get("test", cfg.min_test_per_class))
 
     total_all = int(cap["n_flows"].sum())
-    min_val_total = max(val_abs, int(round(val_frac * total_all)))
-    min_test_total = max(test_abs, int(round(test_frac * total_all)))
+    min_val_total_flows = max(val_abs, int(round(val_frac * total_all)))
+    min_test_total_flows = max(test_abs, int(round(test_frac * total_all)))
 
     cap_map_all = {
         str(r["capture_id"]): (int(r["label"]), int(r["n_flows"]))
         for _, r in cap.iterrows()
     }
 
+    before_sizes = {k: len(final[k]) for k in ("train", "val", "test")}
+
     if (
         min_val_vpn_flows > 0
         or min_test_vpn_flows > 0
-        or min_val_total > 0
-        or min_test_total > 0
+        or min_val_total_flows > 0
+        or min_test_total_flows > 0
         or min_val_vpn_caps > 0
         or min_test_vpn_caps > 0
     ):
-        final = _rebalance_for_min_vpn_in_val_test(
-            splits=final,
-            cap_map=cap_map_all,
+        final = _rebalance_with_swaps_only(
+            final,
+            cap_map_all,
             min_val_vpn_flows=min_val_vpn_flows,
             min_test_vpn_flows=min_test_vpn_flows,
-            min_val_total=min_val_total,
-            min_test_total=min_test_total,
+            min_val_total_flows=min_val_total_flows,
+            min_test_total_flows=min_test_total_flows,
             min_val_vpn_caps=min_val_vpn_caps,
             min_test_vpn_caps=min_test_vpn_caps,
             keep_giants_in_train=keep_giants_in_train,
@@ -546,6 +559,9 @@ def make_vnat_capture_split(
             seed=cfg.seed + 999,
         )
 
+    _assert_split_sizes_unchanged(before_sizes, final)
+
+    # deterministic shuffle
     rng = np.random.default_rng(cfg.seed)
     for split in ("train", "val", "test"):
         rng.shuffle(final[split])
