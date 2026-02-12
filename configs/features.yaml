@@ -2,3 +2,16 @@ window:
   N: 100
   min_packets: 10
   eps: 1e-6
+
+histograms:
+  size:
+    # bytes, clipped at max_size
+    max_size: 2000
+    # edges -> produces (len(bins)-1) features
+    bins: [0, 64, 128, 256, 512, 1024, 1500, 2000]
+
+  iat:
+    # seconds, clipped at max_iat
+    max_iat: 2.0
+    # edges -> more detail early, coarser later
+    bins: [0, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0]
