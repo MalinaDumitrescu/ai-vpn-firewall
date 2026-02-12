@@ -18,10 +18,11 @@ vpn_flow_min:
   test: 60
 
 # Optional: ensure val/test aren't tiny in total flow mass.
-# Keep these moderate; the giant-capture guardrails will prevent the bad case.
+# IMPORTANT for VNAT: keep frac=0.0 so we don't force giant nonvpn captures into val/test.
+# If you want, you can later set val_abs/test_abs to something moderate (e.g. 1500).
 min_total_flows:
-  val_frac: 0.12
-  test_frac: 0.12
+  val_frac: 0.0
+  test_frac: 0.0
   val_abs: 0
   test_abs: 0
 
@@ -33,10 +34,10 @@ min_captures_per_class:
 giants:
   top_k_per_class: 2
 
-# NEW: hard guardrails to prevent the failure mode you hit
+# Hard guardrails to prevent the failure mode you hit (val/test becoming 1 giant capture)
 guardrails:
   keep_giants_in_train: true
-  giant_flow_threshold: 5000     # catches the 11368 + 10555 monsters
+  giant_flow_threshold: 5000   # catches the 11368 + 10555 monsters
   min_vpn_captures:
     val: 5
     test: 5
