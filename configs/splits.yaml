@@ -1,31 +1,29 @@
 seed: 42
 
-# Primary constraint: keep capture counts roughly 70/15/15 (prevents weird splits)
+# Primary constraint: capture-count split (70/15/15) at CAPTURE level
 capture_ratios:
   train: 0.70
   val: 0.15
   test: 0.15
 
-# Secondary objective: approximate flow-mass ratios 70/15/15 within capture constraints
+# Secondary objective: approximate FLOW-mass split (soft objective)
 flow_ratios:
   train: 0.70
   val: 0.15
   test: 0.15
 
+# Hard minimum VPN signal for calibration/threshold tuning
 vpn_flow_min:
   val: 120
   test: 60
 
+# Optional: ensure val/test aren't tiny in total flow mass.
+# Keep these moderate; the giant-capture guardrails will prevent the bad case.
 min_total_flows:
-  val_frac: 0.13
-  test_frac: 0.13
-
+  val_frac: 0.12
+  test_frac: 0.12
   val_abs: 0
   test_abs: 0
-
-unit: "capture_id"
-stratify_by: "label"
-balance_by: "n_flows"
 
 min_captures_per_class:
   train: 10
@@ -34,6 +32,14 @@ min_captures_per_class:
 
 giants:
   top_k_per_class: 2
+
+# NEW: hard guardrails to prevent the failure mode you hit
+guardrails:
+  keep_giants_in_train: true
+  giant_flow_threshold: 5000     # catches the 11368 + 10555 monsters
+  min_vpn_captures:
+    val: 5
+    test: 5
 
 tolerance:
   abs_flow_ratio: 0.05
