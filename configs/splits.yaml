@@ -15,9 +15,9 @@ flow_ratios:
 
 # Hard minimum VPN signal for calibration/threshold tuning (TRAINABLE flows)
 # Your train scaler fit had 56 trainable VPN in TRAIN, so 120/60 is impossible.
-vpn_flow_min:
-  val: 15
-  test: 10
+vpn_trainable_flow_min:
+  val: 120
+  test: 60
 
 # Optional: ensure val/test aren't tiny in total TRAINABLE flow mass.
 min_total_flows:

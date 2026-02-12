@@ -485,7 +485,7 @@ def make_vnat_capture_split(
     # ---- Guardrails from YAML (SWAPS ONLY) ----
     cfg_raw = yaml.safe_load(Path(splits_yaml).read_text(encoding="utf-8")) or {}
 
-    vpn_min = cfg_raw.get("vpn_flow_min") or {}
+    vpn_min = cfg_raw.get("vpn_trainable_flow_min") or {}
     min_val_vpn_flows = int(vpn_min.get("val", 0))
     min_test_vpn_flows = int(vpn_min.get("test", 0))
 
