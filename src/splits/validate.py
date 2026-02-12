@@ -36,9 +36,11 @@ def validate_split_files(
         raise ValueError(f"Overlap val/test: {sorted(list(s_val & s_test))[:10]}")
 
     # --- Load flows ---
-    df = pd.read_parquet(flows_parquet, columns=["capture_id", "label"])
+    df = pd.read_parquet(flows_parquet, columns=["capture_id", "label", "min_packets_ok"])
     if "capture_id" not in df.columns or "label" not in df.columns:
         raise ValueError("flows.parquet must contain capture_id and label columns")
+    if "min_packets_ok" not in df.columns:
+        raise ValueError("flows.parquet must contain min_packets_ok for trainable validation")
 
     df["capture_id"] = df["capture_id"].astype(str)
 
@@ -54,9 +56,15 @@ def validate_split_files(
 
     cap = (
         df.groupby("capture_id")
-        .agg(label=("label", "first"), n_flows=("label", "size"))
+        .agg(
+            label=("label", "first"),
+            n_flows=("label", "size"),
+            n_trainable=("min_packets_ok", "sum"),
+        )
         .reset_index()
     )
+    cap["n_trainable"] = cap["n_trainable"].astype(int)
+
     all_caps = set(cap["capture_id"].tolist())
 
     listed = s_train | s_val | s_test
@@ -68,9 +76,14 @@ def validate_split_files(
     if extra:
         raise ValueError(f"Split lists contain unknown captures. Examples: {sorted(list(extra))[:10]}")
 
-    cap_map = {str(r["capture_id"]): (int(r["label"]), int(r["n_flows"])) for _, r in cap.iterrows()}
+    # cap_map: (label, raw, trainable)
+    cap_map = {
+        str(r["capture_id"]): (int(r["label"]), int(r["n_flows"]), int(r["n_trainable"]))
+        for _, r in cap.iterrows()
+    }
 
     # --- Policy-aware check: no giants in val/test ---
+    # NOTE: giant_flow_threshold is applied to TRAINABLE mass now (aligned with splitting logic).
     if splits_yaml is not None:
         raw = yaml.safe_load(Path(splits_yaml).read_text(encoding="utf-8")) or {}
         guard = raw.get("guardrails") or {}
@@ -78,26 +91,33 @@ def validate_split_files(
         giant_flow_threshold = int(guard.get("giant_flow_threshold", 5000))
 
         if keep_giants_in_train:
-            giants_in_val = [c for c in s_val if cap_map[c][1] >= giant_flow_threshold]
-            giants_in_test = [c for c in s_test if cap_map[c][1] >= giant_flow_threshold]
+            giants_in_val = [c for c in s_val if cap_map[c][2] >= giant_flow_threshold]
+            giants_in_test = [c for c in s_test if cap_map[c][2] >= giant_flow_threshold]
             if giants_in_val or giants_in_test:
                 raise ValueError(
-                    "Policy violation: keep_giants_in_train=true but found giant captures in val/test. "
+                    "Policy violation: keep_giants_in_train=true but found TRAINABLE-giant captures in val/test. "
                     f"threshold={giant_flow_threshold}, "
                     f"giants_in_val={giants_in_val}, giants_in_test={giants_in_test}"
                 )
 
     def stats(ids: Set[str]) -> Dict[str, object]:
         labels = [cap_map[c][0] for c in ids]
-        flows = [cap_map[c][1] for c in ids]
+        raw = [cap_map[c][1] for c in ids]
+        trainable = [cap_map[c][2] for c in ids]
+
+        def by_label(weights: List[int]) -> Dict[str, int]:
+            return {
+                0: int(sum(w for l, w in zip(labels, weights) if l == 0)),
+                1: int(sum(w for l, w in zip(labels, weights) if l == 1)),
+            }
+
         return {
             "n_captures": int(len(ids)),
-            "n_flows": int(sum(flows)),
+            "raw_flows": int(sum(raw)),
+            "trainable_flows": int(sum(trainable)),
             "captures_by_label": {0: int(sum(l == 0 for l in labels)), 1: int(sum(l == 1 for l in labels))},
-            "flows_by_label": {
-                0: int(sum(f for l, f in zip(labels, flows) if l == 0)),
-                1: int(sum(f for l, f in zip(labels, flows) if l == 1)),
-            },
+            "raw_flows_by_label": by_label(raw),
+            "trainable_flows_by_label": by_label(trainable),
         }
 
     return {"train": stats(s_train), "val": stats(s_val), "test": stats(s_test)}

@@ -6,20 +6,20 @@ capture_ratios:
   val: 0.15
   test: 0.15
 
-# Secondary objective: approximate FLOW-mass split (soft objective)
+# Secondary objective: approximate TRAINABLE-flow-mass split (soft objective)
+# IMPORTANT: In code we optimize trainable mass (min_packets_ok==True), not raw n_flows.
 flow_ratios:
   train: 0.70
   val: 0.15
   test: 0.15
 
-# Hard minimum VPN signal for calibration/threshold tuning
+# Hard minimum VPN signal for calibration/threshold tuning (TRAINABLE flows)
+# Your train scaler fit had 56 trainable VPN in TRAIN, so 120/60 is impossible.
 vpn_flow_min:
-  val: 120
-  test: 60
+  val: 15
+  test: 10
 
-# Optional: ensure val/test aren't tiny in total flow mass.
-# IMPORTANT for VNAT: keep frac=0.0 so we don't force giant nonvpn captures into val/test.
-# If you want, you can later set val_abs/test_abs to something moderate (e.g. 1500).
+# Optional: ensure val/test aren't tiny in total TRAINABLE flow mass.
 min_total_flows:
   val_frac: 0.0
   test_frac: 0.0
@@ -34,10 +34,11 @@ min_captures_per_class:
 giants:
   top_k_per_class: 2
 
-# Hard guardrails to prevent the failure mode you hit (val/test becoming 1 giant capture)
+# Guardrails to prevent the failure mode (val/test dominated by a giant)
+# NOTE: giant_flow_threshold applies to TRAINABLE mass now.
 guardrails:
   keep_giants_in_train: true
-  giant_flow_threshold: 5000   # catches the 11368 + 10555 monsters
+  giant_flow_threshold: 900   # vimeo has ~1188 trainable -> this catches that case
   min_vpn_captures:
     val: 5
     test: 5
