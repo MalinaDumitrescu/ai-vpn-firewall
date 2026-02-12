@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Optional
 
 import json
 import pandas as pd
@@ -19,7 +19,7 @@ def validate_split_files(
     val_list: Path,
     test_list: Path,
     *,
-    splits_yaml: Path | None = None,
+    splits_yaml: Optional[Path] = None,
 ) -> Dict[str, object]:
     train = _read_list(train_list)
     val = _read_list(val_list)
@@ -78,8 +78,8 @@ def validate_split_files(
         giant_flow_threshold = int(guard.get("giant_flow_threshold", 5000))
 
         if keep_giants_in_train:
-            giants_in_val = [c for c in val if cap_map[c][1] >= giant_flow_threshold]
-            giants_in_test = [c for c in test if cap_map[c][1] >= giant_flow_threshold]
+            giants_in_val = [c for c in s_val if cap_map[c][1] >= giant_flow_threshold]
+            giants_in_test = [c for c in s_test if cap_map[c][1] >= giant_flow_threshold]
             if giants_in_val or giants_in_test:
                 raise ValueError(
                     "Policy violation: keep_giants_in_train=true but found giant captures in val/test. "
