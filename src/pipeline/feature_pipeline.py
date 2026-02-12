@@ -116,21 +116,35 @@ class FeaturePipeline:
             or self.scaler is None
         ):
             raise RuntimeError("Cannot save an unfitted pipeline.")
-        save_json(art.feature_columns_json, self.feature_cols)
+        
+        # Save metadata including scale/passthrough split
+        meta = {
+            "feature_cols": self.feature_cols,
+            "scale_cols": self.scale_cols,
+            "passthrough_cols": self.passthrough_cols,
+        }
+        save_json(art.feature_columns_json, meta)
         save_pickle(art.scaler_pkl, self.scaler)
         write_text(art.feature_config_hash_txt, feature_config_hash.strip() + "\n")
 
     @staticmethod
     def load(art: FeatureArtifacts) -> "FeaturePipeline":
-        cols = load_json(art.feature_columns_json)
+        meta = load_json(art.feature_columns_json)
         scaler = load_pickle(art.scaler_pkl)
-        if not isinstance(cols, list) or not cols:
-            raise ValueError("feature_columns.json is invalid or empty.")
-
-        # We can reconstruct scale vs passthrough later during fit, but for inference we keep it simple:
-        # Assume that quality flags are the only binary features, but we don't want to guess here.
-        # So: by default scale all columns, and keep passthrough empty. If you need strict passthrough
-        # in inference, store scale_cols/passthrough_cols too.
-        #
-        # Specialist choice: store scale_cols + passthrough_cols. If you want that, say so and I’ll adjust.
-        return FeaturePipeline(feature_cols=list(cols), scale_cols=list(cols), passthrough_cols=[], scaler=scaler)
+        
+        # Handle legacy format (list of strings) vs new format (dict)
+        if isinstance(meta, list):
+             # Fallback for old artifacts: assume all are scaled
+             return FeaturePipeline(
+                 feature_cols=meta,
+                 scale_cols=meta,
+                 passthrough_cols=[],
+                 scaler=scaler
+             )
+        
+        return FeaturePipeline(
+            feature_cols=meta["feature_cols"],
+            scale_cols=meta["scale_cols"],
+            passthrough_cols=meta["passthrough_cols"],
+            scaler=scaler
+        )
