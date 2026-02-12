@@ -32,6 +32,10 @@ def validate_split_files(
         raise ValueError(f"Overlap val/test: {sorted(list(s_val & s_test))[:10]}")
 
     df = pd.read_parquet(flows_parquet, columns=["capture_id", "label"])
+    mixed = int((df.groupby("capture_id")["label"].nunique() > 1).sum())
+    if mixed:
+        raise ValueError(f"Found {mixed} captures with mixed labels. Fix labeling before trusting split lists.")
+
     cap = df.groupby("capture_id").agg(label=("label", "first"), n_flows=("label", "size")).reset_index()
     all_caps = set(cap["capture_id"].astype(str).tolist())
 

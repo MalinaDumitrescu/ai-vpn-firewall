@@ -81,18 +81,10 @@ def _load_cfg(repo_root: Path, cfg_path: Path) -> SplitConfig:
     abs_flow_ratio_tol = float(tol.get("abs_flow_ratio", 0.05))
 
     outputs = cfg.get("outputs") or {}
-    train_list_path = (
-        repo_root / str(outputs.get("train_list", "data/splits/vnat_train_captures.txt"))
-    ).resolve()
-    val_list_path = (
-        repo_root / str(outputs.get("val_list", "data/splits/vnat_val_captures.txt"))
-    ).resolve()
-    test_list_path = (
-        repo_root / str(outputs.get("test_list", "data/splits/vnat_test_captures.txt"))
-    ).resolve()
-    manifest_path = (
-        repo_root / str(outputs.get("manifest", "data/splits/vnat_split_manifest.json"))
-    ).resolve()
+    train_list_path = (repo_root / str(outputs.get("train_list", "data/splits/vnat_train_captures.txt"))).resolve()
+    val_list_path = (repo_root / str(outputs.get("val_list", "data/splits/vnat_val_captures.txt"))).resolve()
+    test_list_path = (repo_root / str(outputs.get("test_list", "data/splits/vnat_test_captures.txt"))).resolve()
+    manifest_path = (repo_root / str(outputs.get("manifest", "data/splits/vnat_split_manifest.json"))).resolve()
 
     return SplitConfig(
         seed=seed,
@@ -313,21 +305,15 @@ def _rebalance_with_swaps_only(
             if vpn_cap_count(splits[target]) >= min_caps:
                 break
 
-            # take a VPN from train (prefer large to help VPN flows too)
             vpn_train = candidates(splits["train"], is_vpn, desc=True, allow_giants=True)
             if not vpn_train:
                 break
 
-            # swap out a NONVPN from target (prefer large to also help total constraints in train)
+            # IMPORTANT: if target has no NONVPN, swapping cannot increase VPN capture count
             nonvpn_target = candidates(splits[target], is_nonvpn, desc=True, allow_giants=False)
             if not nonvpn_target:
-                # if target is all VPN already, swap with smallest VPN (rare)
-                any_target = candidates(splits[target], lambda _: True, desc=False, allow_giants=False)
-                if not any_target:
-                    break
-                b = any_target[0]
-            else:
-                b = nonvpn_target[0]
+                break
+            b = nonvpn_target[0]
 
             a = vpn_train[0]
 
@@ -374,7 +360,6 @@ def _rebalance_with_swaps_only(
             if stats(splits[target])["total"] >= min_total:
                 break
 
-            # bring a big NONVPN from train into target (but not a giant, if requested)
             nonvpn_train = candidates(
                 splits["train"],
                 is_nonvpn,
@@ -384,7 +369,6 @@ def _rebalance_with_swaps_only(
             if not nonvpn_train:
                 break
 
-            # swap out the smallest capture from target back to train (never keep giants in val/test)
             small_target = candidates(splits[target], lambda _: True, desc=False, allow_giants=False)
             if not small_target:
                 break
@@ -392,7 +376,6 @@ def _rebalance_with_swaps_only(
             a = nonvpn_train[0]
             b = small_target[0]
 
-            # never push giants into val/test if requested
             if keep_giants_in_train and is_giant(a):
                 nonvpn_train = [c for c in nonvpn_train if not is_giant(c)]
                 if not nonvpn_train:
@@ -516,13 +499,10 @@ def make_vnat_capture_split(
     val_abs = int(tot_min.get("val_abs", 0))
     test_abs = int(tot_min.get("test_abs", 0))
 
-    # These are safe defaults for VNAT-like distributions
-    # (prevents the exact failure mode you just saw: val/test collapsing to 1 giant nonvpn capture).
     guard = cfg_raw.get("guardrails") or {}
     keep_giants_in_train = bool(guard.get("keep_giants_in_train", True))
     giant_flow_threshold = int(guard.get("giant_flow_threshold", 5000))
     min_vpn_caps = guard.get("min_vpn_captures") or {}
-    # If you don't specify, default to your per-class minimum (so val/test still have enough VPN examples).
     min_val_vpn_caps = int(min_vpn_caps.get("val", cfg.min_val_per_class))
     min_test_vpn_caps = int(min_vpn_caps.get("test", cfg.min_test_per_class))
 
@@ -560,6 +540,20 @@ def make_vnat_capture_split(
         )
 
     _assert_split_sizes_unchanged(before_sizes, final)
+
+    # ---- Final policy assertions ----
+    if keep_giants_in_train:
+        def _is_giant_cap(cid: str) -> bool:
+            return cap_map_all[cid][1] >= giant_flow_threshold
+
+        giants_in_val = [c for c in final["val"] if _is_giant_cap(c)]
+        giants_in_test = [c for c in final["test"] if _is_giant_cap(c)]
+
+        if giants_in_val or giants_in_test:
+            raise RuntimeError(
+                "Policy violation: keep_giants_in_train=True but found giant captures in val/test. "
+                f"giants_in_val={giants_in_val}, giants_in_test={giants_in_test}"
+            )
 
     # deterministic shuffle
     rng = np.random.default_rng(cfg.seed)
@@ -630,6 +624,24 @@ def write_split_files(
             "val": split_stats(splits["val"]),
             "test": split_stats(splits["test"]),
         },
+    }
+
+    # --- Flow ratio diagnostics (tolerance is informational, not a hard fail) ---
+    total_flows = (
+        manifest["split_stats"]["train"]["n_flows"]
+        + manifest["split_stats"]["val"]["n_flows"]
+        + manifest["split_stats"]["test"]["n_flows"]
+    )
+    achieved = {k: manifest["split_stats"][k]["n_flows"] / total_flows for k in ("train", "val", "test")}
+    target = {"train": cfg.flow_train_r, "val": cfg.flow_val_r, "test": cfg.flow_test_r}
+    abs_err = {k: abs(achieved[k] - target[k]) for k in achieved}
+
+    manifest["flow_ratio_check"] = {
+        "target": target,
+        "achieved": achieved,
+        "abs_error": abs_err,
+        "tolerance": cfg.abs_flow_ratio_tol,
+        "within_tolerance": {k: abs_err[k] <= cfg.abs_flow_ratio_tol for k in abs_err},
     }
 
     cfg.manifest_path.parent.mkdir(parents=True, exist_ok=True)
