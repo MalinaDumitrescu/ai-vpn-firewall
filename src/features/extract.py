@@ -14,9 +14,6 @@ from src.features.histograms import HistSpec, fixed_hist
 from src.features.window_quality import WindowQuality, quality_features
 
 
-# -----------------------------
-# Config
-# -----------------------------
 
 @dataclass(frozen=True)
 class FeatureConfig:
@@ -171,7 +168,7 @@ def extract_features_from_flows(
         dr = np.asarray(r.directions, dtype=int)
 
         # Defensive: enforce same length
-        n = min(ts.size, sz.size, dr.size)
+        n = min(ts.size, sz.size, dr.size, cfg.N)
         ts, sz, dr = ts[:n], sz[:n], dr[:n]
 
         # Duration + rates
@@ -183,7 +180,7 @@ def extract_features_from_flows(
         down_bytes = float(down_sz.sum())
         total_bytes = float(sz.sum())
 
-        pkt_count = int(r.packet_count)
+        pkt_count = int(n)
         up_pkts = int(up_sz.size)
         down_pkts = int(down_sz.size)
 
@@ -211,11 +208,14 @@ def extract_features_from_flows(
         h_size_all = fixed_hist(sz, size_spec)
         h_iat_all = fixed_hist(iat_all, iat_spec)
 
+        window_complete = bool(n >= cfg.N)
+        min_packets_ok = bool(n >= cfg.min_packets)
+
         # Quality features (from your precomputed columns)
         q = WindowQuality(
             packet_count=pkt_count,
-            window_complete=bool(r.window_complete),
-            min_packets_ok=bool(r.min_packets_ok),
+            window_complete=window_complete,
+            min_packets_ok=min_packets_ok,
         )
 
         feat: Dict[str, float | int | str] = {
