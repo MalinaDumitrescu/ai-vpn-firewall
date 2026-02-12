@@ -1,6 +1,6 @@
 window:
   N: 100
-  min_packets: 10
+  min_packets: 5
   eps: 1e-6
 
 histograms:
