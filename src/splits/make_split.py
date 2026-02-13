@@ -50,35 +50,56 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def _as_int(v, *, path: str) -> int:
+    """
+    Strict int parsing so config typos like '50j' fail loudly with a helpful message.
+    """
+    try:
+        if isinstance(v, bool):
+            raise ValueError("bool is not int")
+        return int(v)
+    except Exception as e:
+        raise ValueError(f"Invalid integer at '{path}': {v!r}") from e
+
+
+def _as_float(v, *, path: str) -> float:
+    try:
+        if isinstance(v, bool):
+            raise ValueError("bool is not float")
+        return float(v)
+    except Exception as e:
+        raise ValueError(f"Invalid float at '{path}': {v!r}") from e
+
+
 def _load_cfg(repo_root: Path, cfg_path: Path) -> SplitConfig:
     cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
 
-    seed = int(cfg.get("seed", 42))
+    seed = _as_int(cfg.get("seed", 42), path="seed")
 
     cr = cfg.get("capture_ratios") or {}
-    cap_train_r = float(cr.get("train", 0.70))
-    cap_val_r = float(cr.get("val", 0.15))
-    cap_test_r = float(cr.get("test", 0.15))
+    cap_train_r = _as_float(cr.get("train", 0.70), path="capture_ratios.train")
+    cap_val_r = _as_float(cr.get("val", 0.15), path="capture_ratios.val")
+    cap_test_r = _as_float(cr.get("test", 0.15), path="capture_ratios.test")
     if not np.isclose(cap_train_r + cap_val_r + cap_test_r, 1.0):
         raise ValueError("capture_ratios must sum to 1.0")
 
     fr = cfg.get("flow_ratios") or {}
-    flow_train_r = float(fr.get("train", 0.70))
-    flow_val_r = float(fr.get("val", 0.15))
-    flow_test_r = float(fr.get("test", 0.15))
+    flow_train_r = _as_float(fr.get("train", 0.70), path="flow_ratios.train")
+    flow_val_r = _as_float(fr.get("val", 0.15), path="flow_ratios.val")
+    flow_test_r = _as_float(fr.get("test", 0.15), path="flow_ratios.test")
     if not np.isclose(flow_train_r + flow_val_r + flow_test_r, 1.0):
         raise ValueError("flow_ratios must sum to 1.0")
 
     mins = cfg.get("min_captures_per_class") or {}
-    min_train = int(mins.get("train", 10))
-    min_val = int(mins.get("val", 5))
-    min_test = int(mins.get("test", 5))
+    min_train = _as_int(mins.get("train", 10), path="min_captures_per_class.train")
+    min_val = _as_int(mins.get("val", 5), path="min_captures_per_class.val")
+    min_test = _as_int(mins.get("test", 5), path="min_captures_per_class.test")
 
     giants = cfg.get("giants") or {}
-    top_k = int(giants.get("top_k_per_class", 2))
+    top_k = _as_int(giants.get("top_k_per_class", 2), path="giants.top_k_per_class")
 
     tol = cfg.get("tolerance") or {}
-    abs_flow_ratio_tol = float(tol.get("abs_flow_ratio", 0.05))
+    abs_flow_ratio_tol = _as_float(tol.get("abs_flow_ratio", 0.05), path="tolerance.abs_flow_ratio")
 
     outputs = cfg.get("outputs") or {}
     train_list_path = (repo_root / str(outputs.get("train_list", "data/splits/vnat_train_captures.txt"))).resolve()
@@ -139,7 +160,6 @@ def _flow_targets(total_mass: int, train_r: float, val_r: float) -> Dict[str, in
 
 # ============================================================
 # Assignment: per-class, capture-limited, flow-guided
-#   NOTE: This works on whatever "weight" you pass as n_flows.
 # ============================================================
 
 def _assign_giants_with_cap_limits(
@@ -222,29 +242,40 @@ def _assign_remaining_greedy(
 
 # ============================================================
 # Rebalance (SWAPS ONLY) to satisfy guardrails
-#   IMPORTANT:
-#     - "total flows" guardrails use RAW flows
-#     - "vpn_trainable_flow_min" uses TRAINABLE flows
-#     - "giants" are defined by RAW flows (policy reason)
-#     - NEW: "vpn heavy" guardrail uses TRAINABLE flows per capture
+#
+# IMPORTANT:
+#   - "total flows" guardrails can use RAW flows (optional legacy)
+#   - vpn_trainable_flow_min uses TRAINABLE flows (sum per-split over VPN captures)
+#   - GIANTS: defined by TRAINABLE flows per capture (matches your YAML comment)
+#   - vpn-heavy: TRAINABLE flows per capture
+#   - vpn_trainable_flow_min_train: min VPN trainable flows in TRAIN
+#   - max_vpn_fraction_trainable: cap VPN fraction in val/test by trainable mass
+#
+# Fixes in this version:
+#   1) iterative rebalance until stable (prevents later steps undoing earlier guardrails)
+#   2) when boosting total trainable/raw in val/test, prefer swapping OUT nonVPN first
 # ============================================================
 
 def _rebalance_with_swaps_only(
     splits: Dict[str, List[str]],
     cap_map: Dict[str, Dict[str, int]],  # cid -> {"label":0/1, "raw":int, "trainable":int}
     *,
+    min_train_vpn_trainable: int,
     min_val_vpn_trainable: int,
     min_test_vpn_trainable: int,
     min_val_total_raw: int,
     min_test_total_raw: int,
+    min_val_total_trainable: int,
+    min_test_total_trainable: int,
     min_val_vpn_caps: int,
     min_test_vpn_caps: int,
-    # NEW:
     min_val_vpn_heavy_caps: int,
     min_test_vpn_heavy_caps: int,
     vpn_heavy_trainable_threshold: int,
+    max_val_vpn_fraction_trainable: float,
+    max_test_vpn_fraction_trainable: float,
     keep_giants_in_train: bool,
-    giant_raw_threshold: int,
+    giant_trainable_threshold: int,
     seed: int,
 ) -> Dict[str, List[str]]:
     rng = np.random.default_rng(seed)
@@ -264,8 +295,9 @@ def _rebalance_with_swaps_only(
     def trainable(cid: str) -> int:
         return int(cap_map[cid]["trainable"])
 
+    # GIANT defined by TRAINABLE flows per capture
     def is_giant(cid: str) -> bool:
-        return raw(cid) >= giant_raw_threshold
+        return trainable(cid) >= giant_trainable_threshold
 
     def is_vpn_heavy(cid: str) -> bool:
         return is_vpn(cid) and trainable(cid) >= vpn_heavy_trainable_threshold
@@ -278,8 +310,14 @@ def _rebalance_with_swaps_only(
 
     def stats(ids: List[str]) -> Dict[str, int]:
         total_raw = sum(raw(c) for c in ids)
+        total_trainable = sum(trainable(c) for c in ids)
         vpn_trainable = sum(trainable(c) for c in ids if is_vpn(c))
-        return {"total_raw": total_raw, "vpn_trainable": vpn_trainable}
+        return {"total_raw": total_raw, "total_trainable": total_trainable, "vpn_trainable": vpn_trainable}
+
+    def vpn_fraction_trainable(ids: List[str]) -> float:
+        st = stats(ids)
+        denom = max(int(st["total_trainable"]), 1)
+        return float(st["vpn_trainable"]) / float(denom)
 
     def candidates(ids: List[str], pred, *, desc: bool, allow_giants: bool, key_fn) -> List[str]:
         out = [c for c in ids if pred(c)]
@@ -294,191 +332,329 @@ def _rebalance_with_swaps_only(
         splits[a_split].append(b_cid)
         splits[b_split].append(a_cid)
 
-    # --- 0) HARD POLICY: evict RAW giants from val/test back into train (SWAPS ONLY) ---
-    if keep_giants_in_train and giant_raw_threshold > 0:
+    def signature() -> Tuple[Tuple[str, ...], Tuple[str, ...], Tuple[str, ...]]:
+        # order-insensitive stable signature
+        return (
+            tuple(sorted(splits["train"])),
+            tuple(sorted(splits["val"])),
+            tuple(sorted(splits["test"])),
+        )
 
-        def evict_from(split_name: str) -> None:
-            guard_iter = 0
-            while True:
-                guard_iter += 1
-                if guard_iter > 20000:
-                    raise RuntimeError(
-                        f"Could not evict giants from {split_name} after many swaps. Check thresholds."
+    def one_pass() -> None:
+        # --- 0) HARD POLICY: evict GIANTS from val/test back into train (SWAPS ONLY) ---
+        if keep_giants_in_train and giant_trainable_threshold > 0:
+
+            def evict_from(split_name: str) -> None:
+                guard_iter = 0
+                while True:
+                    guard_iter += 1
+                    if guard_iter > 20000:
+                        raise RuntimeError(
+                            f"Could not evict giants from {split_name} after many swaps. Check thresholds."
+                        )
+
+                    giants_here = sorted(
+                        [c for c in splits[split_name] if is_giant(c)],
+                        key=trainable,
+                        reverse=True,
                     )
+                    if not giants_here:
+                        break
 
-                giants_here = sorted(
-                    [c for c in splits[split_name] if is_giant(c)],
-                    key=raw,
-                    reverse=True,
+                    g = giants_here[0]
+                    y = label(g)
+
+                    train_candidates = [c for c in splits["train"] if label(c) == y and not is_giant(c)]
+                    if not train_candidates:
+                        raise RuntimeError(
+                            f"Impossible policy: keep_giants_in_train=True but train has no non-giant "
+                            f"candidates to swap with for label={y}. "
+                            f"Try increasing guardrails.giant_flow_threshold or set keep_giants_in_train=false."
+                        )
+
+                    swap_in = min(train_candidates, key=trainable)
+                    do_swap("train", split_name, swap_in, g)
+
+            evict_from("val")
+            evict_from("test")
+
+        # --- 1) Min VPN CAPTURES in val/test ---
+        for target, min_caps in (("val", min_val_vpn_caps), ("test", min_test_vpn_caps)):
+            if min_caps <= 0:
+                continue
+
+            for _ in range(4000):
+                if vpn_cap_count(splits[target]) >= min_caps:
+                    break
+
+                vpn_train = candidates(
+                    splits["train"], is_vpn, desc=True, allow_giants=True, key_fn=trainable
                 )
-                if not giants_here:
+                nonvpn_target = candidates(
+                    splits[target], is_nonvpn, desc=True, allow_giants=False, key_fn=raw
+                )
+                if not vpn_train or not nonvpn_target:
                     break
 
-                g = giants_here[0]
-                y = label(g)
-
-                train_candidates = [c for c in splits["train"] if label(c) == y and not is_giant(c)]
-                if not train_candidates:
-                    raise RuntimeError(
-                        f"Impossible policy: keep_giants_in_train=True but train has no non-giant "
-                        f"candidates to swap with for label={y}. "
-                        f"Try increasing giant_raw_threshold or set keep_giants_in_train=false."
-                    )
-
-                swap_in = min(train_candidates, key=raw)
-                do_swap("train", split_name, swap_in, g)
-
-        evict_from("val")
-        evict_from("test")
-
-    # --- 1) Min VPN CAPTURES in val/test ---
-    for target, min_caps in (("val", min_val_vpn_caps), ("test", min_test_vpn_caps)):
-        if min_caps <= 0:
-            continue
-
-        for _ in range(4000):
-            if vpn_cap_count(splits[target]) >= min_caps:
-                break
-
-            vpn_train = candidates(
-                splits["train"], is_vpn, desc=True,
-                allow_giants=True, key_fn=trainable
-            )
-            if not vpn_train:
-                break
-
-            nonvpn_target = candidates(
-                splits[target], is_nonvpn, desc=True,
-                allow_giants=False, key_fn=raw
-            )
-            if not nonvpn_target:
-                break
-
-            a = vpn_train[0]
-            b = nonvpn_target[0]
-
-            if keep_giants_in_train and is_giant(a):
-                vpn_train = [c for c in vpn_train if not is_giant(c)]
-                if not vpn_train:
-                    break
                 a = vpn_train[0]
+                b = nonvpn_target[0]
 
-            do_swap("train", target, a, b)
+                if keep_giants_in_train and is_giant(a):
+                    vpn_train = [c for c in vpn_train if not is_giant(c)]
+                    if not vpn_train:
+                        break
+                    a = vpn_train[0]
 
-    # --- 1.5) NEW: Min VPN HEAVY CAPTURES in val/test ---
-    # This forces at least one "strong VPN" capture into val/test (e.g., vpn_voip_capture1/2/3 in your data).
-    for target, min_heavy in (("val", min_val_vpn_heavy_caps), ("test", min_test_vpn_heavy_caps)):
-        if min_heavy <= 0 or vpn_heavy_trainable_threshold <= 0:
-            continue
+                do_swap("train", target, a, b)
 
-        for _ in range(6000):
-            if vpn_heavy_count(splits[target]) >= min_heavy:
-                break
+        # --- 1.5) Min VPN HEAVY CAPTURES in val/test ---
+        for target, min_heavy in (("val", min_val_vpn_heavy_caps), ("test", min_test_vpn_heavy_caps)):
+            if min_heavy <= 0 or vpn_heavy_trainable_threshold <= 0:
+                continue
 
-            heavy_train = candidates(
-                splits["train"],
-                is_vpn_heavy,
-                desc=True,
-                allow_giants=True,
-                key_fn=trainable,
-            )
-            if not heavy_train:
-                break
-
-            # Swap out a nonVPN from target (prefer larger raw so we don't shrink target mass too much)
-            nonvpn_target = candidates(
-                splits[target],
-                is_nonvpn,
-                desc=True,
-                allow_giants=False,
-                key_fn=raw,
-            )
-            if not nonvpn_target:
-                break
-
-            a = heavy_train[0]
-            b = nonvpn_target[0]
-
-            # Respect giant policy (rare for VPN heavy in your dataset, but keep it safe)
-            if keep_giants_in_train and is_giant(a):
-                heavy_train = [c for c in heavy_train if not is_giant(c)]
-                if not heavy_train:
+            for _ in range(6000):
+                if vpn_heavy_count(splits[target]) >= min_heavy:
                     break
+
+                heavy_train = candidates(
+                    splits["train"], is_vpn_heavy, desc=True, allow_giants=True, key_fn=trainable
+                )
+                nonvpn_target = candidates(
+                    splits[target], is_nonvpn, desc=True, allow_giants=False, key_fn=raw
+                )
+                if not heavy_train or not nonvpn_target:
+                    break
+
                 a = heavy_train[0]
+                b = nonvpn_target[0]
 
-            do_swap("train", target, a, b)
+                if keep_giants_in_train and is_giant(a):
+                    heavy_train = [c for c in heavy_train if not is_giant(c)]
+                    if not heavy_train:
+                        break
+                    a = heavy_train[0]
 
-    # --- 2) Min VPN TRAINABLE FLOWS in val/test ---
-    for target, min_vpn_trainable in (("val", min_val_vpn_trainable), ("test", min_test_vpn_trainable)):
-        if min_vpn_trainable <= 0:
-            continue
+                do_swap("train", target, a, b)
 
-        for _ in range(8000):
-            if stats(splits[target])["vpn_trainable"] >= min_vpn_trainable:
-                break
+        # --- 2) Min VPN TRAINABLE FLOWS in val/test ---
+        for target, min_vpn_tr in (("val", min_val_vpn_trainable), ("test", min_test_vpn_trainable)):
+            if min_vpn_tr <= 0:
+                continue
 
-            vpn_train = candidates(
-                splits["train"], is_vpn, desc=True,
-                allow_giants=True, key_fn=trainable
-            )
-            nonvpn_target = candidates(
-                splits[target], is_nonvpn, desc=True,
-                allow_giants=False, key_fn=raw
-            )
-            if not vpn_train or not nonvpn_target:
-                break
-
-            a = vpn_train[0]
-            b = nonvpn_target[0]
-
-            if keep_giants_in_train and is_giant(a):
-                vpn_train = [c for c in vpn_train if not is_giant(c)]
-                if not vpn_train:
+            for _ in range(8000):
+                if stats(splits[target])["vpn_trainable"] >= min_vpn_tr:
                     break
+
+                vpn_train = candidates(
+                    splits["train"], is_vpn, desc=True, allow_giants=True, key_fn=trainable
+                )
+                nonvpn_target = candidates(
+                    splits[target], is_nonvpn, desc=True, allow_giants=False, key_fn=raw
+                )
+                if not vpn_train or not nonvpn_target:
+                    break
+
                 a = vpn_train[0]
+                b = nonvpn_target[0]
 
-            do_swap("train", target, a, b)
+                if keep_giants_in_train and is_giant(a):
+                    vpn_train = [c for c in vpn_train if not is_giant(c)]
+                    if not vpn_train:
+                        break
+                    a = vpn_train[0]
 
-    # --- 3) Min TOTAL RAW FLOWS in val/test ---
-    for target, min_total_raw in (("val", min_val_total_raw), ("test", min_test_total_raw)):
-        if min_total_raw <= 0:
-            continue
+                do_swap("train", target, a, b)
 
-        for _ in range(12000):
-            if stats(splits[target])["total_raw"] >= min_total_raw:
-                break
+        # --- 3) Min TOTAL TRAINABLE FLOWS in val/test ---
+        for target, min_total_tr in (("val", min_val_total_trainable), ("test", min_test_total_trainable)):
+            if min_total_tr <= 0:
+                continue
 
-            nonvpn_train = candidates(
-                splits["train"],
-                is_nonvpn,
-                desc=True,
-                allow_giants=not keep_giants_in_train,
-                key_fn=raw,
-            )
-            if not nonvpn_train:
-                break
+            for _ in range(12000):
+                if stats(splits[target])["total_trainable"] >= min_total_tr:
+                    break
 
-            small_target = candidates(
-                splits[target],
-                lambda _: True,
-                desc=False,
-                allow_giants=False,
-                key_fn=raw,
-            )
-            if not small_target:
-                break
-
-            a = nonvpn_train[0]
-            b = small_target[0]
-
-            if keep_giants_in_train and is_giant(a):
-                nonvpn_train = [c for c in nonvpn_train if not is_giant(c)]
+                nonvpn_train = candidates(
+                    splits["train"],
+                    is_nonvpn,
+                    desc=True,
+                    allow_giants=not keep_giants_in_train,
+                    key_fn=trainable,
+                )
                 if not nonvpn_train:
                     break
+
+                # Prefer swapping OUT nonVPN from target first to preserve VPN signal.
+                small_target = candidates(
+                    splits[target],
+                    is_nonvpn,
+                    desc=False,
+                    allow_giants=False,
+                    key_fn=trainable,
+                )
+                if not small_target:
+                    small_target = candidates(
+                        splits[target],
+                        lambda _: True,
+                        desc=False,
+                        allow_giants=False,
+                        key_fn=trainable,
+                    )
+                if not small_target:
+                    break
+
                 a = nonvpn_train[0]
+                b = small_target[0]
 
-            do_swap("train", target, a, b)
+                if keep_giants_in_train and is_giant(a):
+                    nonvpn_train = [c for c in nonvpn_train if not is_giant(c)]
+                    if not nonvpn_train:
+                        break
+                    a = nonvpn_train[0]
 
+                do_swap("train", target, a, b)
+
+        # --- 4) Min TOTAL RAW FLOWS in val/test (optional legacy) ---
+        for target, min_total_raw in (("val", min_val_total_raw), ("test", min_test_total_raw)):
+            if min_total_raw <= 0:
+                continue
+
+            for _ in range(12000):
+                if stats(splits[target])["total_raw"] >= min_total_raw:
+                    break
+
+                nonvpn_train = candidates(
+                    splits["train"],
+                    is_nonvpn,
+                    desc=True,
+                    allow_giants=not keep_giants_in_train,
+                    key_fn=raw,
+                )
+                if not nonvpn_train:
+                    break
+
+                # Prefer swapping OUT nonVPN from target first to preserve VPN signal.
+                small_target = candidates(
+                    splits[target],
+                    is_nonvpn,
+                    desc=False,
+                    allow_giants=False,
+                    key_fn=raw,
+                )
+                if not small_target:
+                    small_target = candidates(
+                        splits[target],
+                        lambda _: True,
+                        desc=False,
+                        allow_giants=False,
+                        key_fn=raw,
+                    )
+                if not small_target:
+                    break
+
+                a = nonvpn_train[0]
+                b = small_target[0]
+
+                if keep_giants_in_train and is_giant(a):
+                    nonvpn_train = [c for c in nonvpn_train if not is_giant(c)]
+                    if not nonvpn_train:
+                        break
+                    a = nonvpn_train[0]
+
+                do_swap("train", target, a, b)
+
+        # --- 5) Min VPN TRAINABLE FLOWS in TRAIN ---
+        if min_train_vpn_trainable > 0:
+            for _ in range(12000):
+                if stats(splits["train"])["vpn_trainable"] >= min_train_vpn_trainable:
+                    break
+
+                src = "val" if stats(splits["val"])["vpn_trainable"] >= stats(splits["test"])["vpn_trainable"] else "test"
+
+                vpn_src = candidates(
+                    splits[src],
+                    is_vpn,
+                    desc=True,
+                    allow_giants=False,
+                    key_fn=trainable,
+                )
+                nonvpn_train = candidates(
+                    splits["train"],
+                    is_nonvpn,
+                    desc=False,
+                    allow_giants=not keep_giants_in_train,
+                    key_fn=trainable,
+                )
+
+                if not vpn_src or not nonvpn_train:
+                    break
+
+                a = vpn_src[0]
+                b = nonvpn_train[0]
+
+                if keep_giants_in_train and is_giant(b):
+                    nonvpn_train = [c for c in nonvpn_train if not is_giant(c)]
+                    if not nonvpn_train:
+                        break
+                    b = nonvpn_train[0]
+
+                do_swap(src, "train", a, b)
+
+        # --- 6) Max VPN FRACTION by trainable mass in val/test ---
+        def enforce_max_vpn_fraction(target: str, max_frac: float) -> None:
+            if max_frac <= 0.0 or max_frac >= 1.0:
+                return
+
+            for _ in range(20000):
+                frac = vpn_fraction_trainable(splits[target])
+                if frac <= max_frac:
+                    break
+
+                vpn_target = candidates(
+                    splits[target],
+                    is_vpn,
+                    desc=True,
+                    allow_giants=False,
+                    key_fn=trainable,
+                )
+                if not vpn_target:
+                    break
+
+                nonvpn_train = candidates(
+                    splits["train"],
+                    is_nonvpn,
+                    desc=True,
+                    allow_giants=not keep_giants_in_train,
+                    key_fn=trainable,
+                )
+                if not nonvpn_train:
+                    break
+
+                a = vpn_target[0]
+                b = nonvpn_train[0]
+
+                if keep_giants_in_train and is_giant(b):
+                    nonvpn_train = [c for c in nonvpn_train if not is_giant(c)]
+                    if not nonvpn_train:
+                        break
+                    b = nonvpn_train[0]
+
+                do_swap(target, "train", a, b)
+
+        enforce_max_vpn_fraction("val", max_val_vpn_fraction_trainable)
+        enforce_max_vpn_fraction("test", max_test_vpn_fraction_trainable)
+
+    # Iterate passes until the assignment stabilizes (prevents step 5/6 undoing step 2/3).
+    max_rounds = 50
+    last_sig = None
+    for _ in range(max_rounds):
+        cur = signature()
+        if last_sig is not None and cur == last_sig:
+            break
+        last_sig = cur
+        one_pass()
+
+    # Shuffle final order (does not change membership)
     rng.shuffle(splits["train"])
     rng.shuffle(splits["val"])
     rng.shuffle(splits["test"])
@@ -508,10 +684,12 @@ def make_vnat_capture_split(
       - Split is CAPTURE-level stratified by label 0/1.
       - The flow objective uses TRAINABLE mass (sum(min_packets_ok)).
       - Guardrails are enforced with SWAPS ONLY and use:
-          * total size: RAW flow counts (n_flows)
-          * vpn signal: TRAINABLE flow counts (n_trainable)
-          * giants: RAW flow counts (policy)
-          * NEW: vpn-heavy: TRAINABLE flows per capture (to force strong VPN signal into val/test)
+          * total RAW size: raw flow counts (optional)
+          * learning signal: TRAINABLE flow counts
+          * GIANTS: TRAINABLE flows per capture (matches splits.yaml comment)
+          * VPN-heavy: TRAINABLE flows per capture
+          * vpn_trainable_flow_min_train
+          * max_vpn_fraction_trainable
     """
     cfg = _load_cfg(repo_root, splits_yaml)
 
@@ -606,29 +784,43 @@ def make_vnat_capture_split(
     # ---- Guardrails from YAML (SWAPS ONLY) ----
     cfg_raw = yaml.safe_load(Path(splits_yaml).read_text(encoding="utf-8")) or {}
 
+    # min VPN trainable in TRAIN
+    vpn_min_train = cfg_raw.get("vpn_trainable_flow_min_train") or {}
+    min_train_vpn_trainable = _as_int(vpn_min_train.get("train", 0), path="vpn_trainable_flow_min_train.train")
+
     vpn_min = cfg_raw.get("vpn_trainable_flow_min") or {}
-    min_val_vpn_trainable = int(vpn_min.get("val", 0))
-    min_test_vpn_trainable = int(vpn_min.get("test", 0))
+    min_val_vpn_trainable = _as_int(vpn_min.get("val", 0), path="vpn_trainable_flow_min.val")
+    min_test_vpn_trainable = _as_int(vpn_min.get("test", 0), path="vpn_trainable_flow_min.test")
 
     tot_min = cfg_raw.get("min_total_flows") or {}
-    val_frac = float(tot_min.get("val_frac", 0.0))
-    test_frac = float(tot_min.get("test_frac", 0.0))
-    val_abs = int(tot_min.get("val_abs", 0))
-    test_abs = int(tot_min.get("test_abs", 0))
+    val_frac = _as_float(tot_min.get("val_frac", 0.0), path="min_total_flows.val_frac")
+    test_frac = _as_float(tot_min.get("test_frac", 0.0), path="min_total_flows.test_frac")
+    val_abs = _as_int(tot_min.get("val_abs", 0), path="min_total_flows.val_abs")
+    test_abs = _as_int(tot_min.get("test_abs", 0), path="min_total_flows.test_abs")
+
+    tot_trainable = cfg_raw.get("min_total_trainable_flows") or {}
+    min_val_total_trainable = _as_int(tot_trainable.get("val_abs", 0), path="min_total_trainable_flows.val_abs")
+    min_test_total_trainable = _as_int(tot_trainable.get("test_abs", 0), path="min_total_trainable_flows.test_abs")
 
     guard = cfg_raw.get("guardrails") or {}
     keep_giants_in_train = bool(guard.get("keep_giants_in_train", True))
-    giant_raw_threshold = int(guard.get("giant_flow_threshold", 5000))
+    giant_trainable_threshold = _as_int(guard.get("giant_flow_threshold", 0), path="guardrails.giant_flow_threshold")
 
     min_vpn_caps = guard.get("min_vpn_captures") or {}
-    min_val_vpn_caps = int(min_vpn_caps.get("val", cfg.min_val_per_class))
-    min_test_vpn_caps = int(min_vpn_caps.get("test", cfg.min_test_per_class))
+    min_val_vpn_caps = _as_int(min_vpn_caps.get("val", cfg.min_val_per_class), path="guardrails.min_vpn_captures.val")
+    min_test_vpn_caps = _as_int(min_vpn_caps.get("test", cfg.min_test_per_class), path="guardrails.min_vpn_captures.test")
 
-    # NEW: vpn-heavy guardrail parsing (all optional; defaults keep old behavior)
     min_vpn_heavy = guard.get("min_vpn_heavy_captures") or {}
-    min_val_vpn_heavy_caps = int(min_vpn_heavy.get("val", 0))
-    min_test_vpn_heavy_caps = int(min_vpn_heavy.get("test", 0))
-    vpn_heavy_trainable_threshold = int(guard.get("vpn_heavy_trainable_threshold", 0))
+    min_val_vpn_heavy_caps = _as_int(min_vpn_heavy.get("val", 0), path="guardrails.min_vpn_heavy_captures.val")
+    min_test_vpn_heavy_caps = _as_int(min_vpn_heavy.get("test", 0), path="guardrails.min_vpn_heavy_captures.test")
+    vpn_heavy_trainable_threshold = _as_int(
+        guard.get("vpn_heavy_trainable_threshold", 0),
+        path="guardrails.vpn_heavy_trainable_threshold",
+    )
+
+    max_vpn_frac = cfg_raw.get("max_vpn_fraction_trainable") or {}
+    max_val_vpn_fraction_trainable = _as_float(max_vpn_frac.get("val", 0.0), path="max_vpn_fraction_trainable.val")
+    max_test_vpn_fraction_trainable = _as_float(max_vpn_frac.get("test", 0.0), path="max_vpn_fraction_trainable.test")
 
     total_raw_all = int(cap["n_flows"].sum())
     min_val_total_raw = max(val_abs, int(round(val_frac * total_raw_all)))
@@ -643,15 +835,35 @@ def make_vnat_capture_split(
         for _, r in cap.iterrows()
     }
 
-    total_vpn_caps = sum(1 for _, v in cap_map_both.items() if v["label"] == 1)
+    total_vpn_caps = sum(1 for v in cap_map_both.values() if v["label"] == 1)
     total_vpn_trainable = sum(v["trainable"] for v in cap_map_both.values() if v["label"] == 1)
 
-    # NEW: feasibility check for vpn-heavy
-    if min_val_vpn_heavy_caps > 0 or min_test_vpn_heavy_caps > 0:
+    # feasibility checks
+    if min_val_vpn_caps + min_test_vpn_caps > total_vpn_caps:
+        raise ValueError(
+            f"Impossible guardrail: min_vpn_captures(val)+min_vpn_captures(test)={min_val_vpn_caps}+{min_test_vpn_caps} "
+            f"exceeds total VPN captures available={total_vpn_caps}."
+        )
+
+    if min_train_vpn_trainable < 0:
+        raise ValueError("vpn_trainable_flow_min_train.train must be >= 0")
+
+    if min_val_vpn_trainable + min_test_vpn_trainable > total_vpn_trainable:
+        raise ValueError(
+            f"Impossible guardrail: vpn_trainable_flow_min(val)+vpn_trainable_flow_min(test)={min_val_vpn_trainable}+{min_test_vpn_trainable} "
+            f"exceeds total VPN trainable flows available={total_vpn_trainable}. Lower vpn_trainable_flow_min."
+        )
+
+    if min_train_vpn_trainable > total_vpn_trainable:
+        raise ValueError(
+            f"Impossible guardrail: vpn_trainable_flow_min_train(train)={min_train_vpn_trainable} "
+            f"exceeds total VPN trainable flows available={total_vpn_trainable}."
+        )
+
+    if (min_val_vpn_heavy_caps > 0 or min_test_vpn_heavy_caps > 0):
         if vpn_heavy_trainable_threshold <= 0:
             raise ValueError(
-                "Invalid guardrail: min_vpn_heavy_captures is set but vpn_heavy_trainable_threshold <= 0. "
-                "Set guardrails.vpn_heavy_trainable_threshold (e.g., 50)."
+                "Invalid guardrail: min_vpn_heavy_captures is set but vpn_heavy_trainable_threshold <= 0."
             )
         total_vpn_heavy_caps = sum(
             1 for v in cap_map_both.values()
@@ -664,59 +876,60 @@ def make_vnat_capture_split(
                 f"{total_vpn_heavy_caps} at threshold={vpn_heavy_trainable_threshold}."
             )
 
-    if min_val_vpn_caps + min_test_vpn_caps > total_vpn_caps:
-        raise ValueError(
-            f"Impossible guardrail: min_vpn_captures(val)+min_vpn_captures(test)={min_val_vpn_caps}+{min_test_vpn_caps} "
-            f"exceeds total VPN captures available={total_vpn_caps}."
-        )
-    if min_val_vpn_trainable + min_test_vpn_trainable > total_vpn_trainable:
-        raise ValueError(
-            f"Impossible guardrail: vpn_trainable_flow_min(val)+vpn_trainable_flow_min(test)={min_val_vpn_trainable}+{min_test_vpn_trainable} "
-            f"exceeds total VPN trainable flows available={total_vpn_trainable}. "
-            f"Lower vpn_trainable_flow_min in splits.yaml."
-        )
+    for name, v in (("val", max_val_vpn_fraction_trainable), ("test", max_test_vpn_fraction_trainable)):
+        if v != 0.0 and not (0.0 < v < 1.0):
+            raise ValueError(f"max_vpn_fraction_trainable.{name} must be 0 or within (0,1). Got {v}.")
 
     before_sizes = {k: len(final[k]) for k in ("train", "val", "test")}
 
     need_rebalance = (
         keep_giants_in_train
+        or min_train_vpn_trainable > 0
         or min_val_vpn_trainable > 0
         or min_test_vpn_trainable > 0
         or min_val_total_raw > 0
         or min_test_total_raw > 0
+        or min_val_total_trainable > 0
+        or min_test_total_trainable > 0
         or min_val_vpn_caps > 0
         or min_test_vpn_caps > 0
         or min_val_vpn_heavy_caps > 0
         or min_test_vpn_heavy_caps > 0
+        or max_val_vpn_fraction_trainable > 0.0
+        or max_test_vpn_fraction_trainable > 0.0
     )
 
     if need_rebalance:
         final = _rebalance_with_swaps_only(
             final,
             cap_map_both,
+            min_train_vpn_trainable=min_train_vpn_trainable,
             min_val_vpn_trainable=min_val_vpn_trainable,
             min_test_vpn_trainable=min_test_vpn_trainable,
             min_val_total_raw=min_val_total_raw,
             min_test_total_raw=min_test_total_raw,
+            min_val_total_trainable=min_val_total_trainable,
+            min_test_total_trainable=min_test_total_trainable,
             min_val_vpn_caps=min_val_vpn_caps,
             min_test_vpn_caps=min_test_vpn_caps,
-            # NEW:
             min_val_vpn_heavy_caps=min_val_vpn_heavy_caps,
             min_test_vpn_heavy_caps=min_test_vpn_heavy_caps,
             vpn_heavy_trainable_threshold=vpn_heavy_trainable_threshold,
+            max_val_vpn_fraction_trainable=max_val_vpn_fraction_trainable,
+            max_test_vpn_fraction_trainable=max_test_vpn_fraction_trainable,
             keep_giants_in_train=keep_giants_in_train,
-            giant_raw_threshold=giant_raw_threshold,
+            giant_trainable_threshold=giant_trainable_threshold,
             seed=cfg.seed + 999,
         )
 
     _assert_split_sizes_unchanged(before_sizes, final)
 
-    if keep_giants_in_train:
-        giants_in_val = [c for c in final["val"] if cap_map_both[c]["raw"] >= giant_raw_threshold]
-        giants_in_test = [c for c in final["test"] if cap_map_both[c]["raw"] >= giant_raw_threshold]
+    if keep_giants_in_train and giant_trainable_threshold > 0:
+        giants_in_val = [c for c in final["val"] if cap_map_both[c]["trainable"] >= giant_trainable_threshold]
+        giants_in_test = [c for c in final["test"] if cap_map_both[c]["trainable"] >= giant_trainable_threshold]
         if giants_in_val or giants_in_test:
             raise RuntimeError(
-                "Policy violation: keep_giants_in_train=True but found RAW-giant captures in val/test. "
+                "Policy violation: keep_giants_in_train=True but found TRAINABLE-giant captures in val/test. "
                 f"giants_in_val={giants_in_val}, giants_in_test={giants_in_test}"
             )
 
