@@ -226,6 +226,7 @@ def _assign_remaining_greedy(
 #     - "total flows" guardrails use RAW flows
 #     - "vpn_trainable_flow_min" uses TRAINABLE flows
 #     - "giants" are defined by RAW flows (policy reason)
+#     - NEW: "vpn heavy" guardrail uses TRAINABLE flows per capture
 # ============================================================
 
 def _rebalance_with_swaps_only(
@@ -238,6 +239,10 @@ def _rebalance_with_swaps_only(
     min_test_total_raw: int,
     min_val_vpn_caps: int,
     min_test_vpn_caps: int,
+    # NEW:
+    min_val_vpn_heavy_caps: int,
+    min_test_vpn_heavy_caps: int,
+    vpn_heavy_trainable_threshold: int,
     keep_giants_in_train: bool,
     giant_raw_threshold: int,
     seed: int,
@@ -262,8 +267,14 @@ def _rebalance_with_swaps_only(
     def is_giant(cid: str) -> bool:
         return raw(cid) >= giant_raw_threshold
 
+    def is_vpn_heavy(cid: str) -> bool:
+        return is_vpn(cid) and trainable(cid) >= vpn_heavy_trainable_threshold
+
     def vpn_cap_count(ids: List[str]) -> int:
         return sum(1 for c in ids if is_vpn(c))
+
+    def vpn_heavy_count(ids: List[str]) -> int:
+        return sum(1 for c in ids if is_vpn_heavy(c))
 
     def stats(ids: List[str]) -> Dict[str, int]:
         total_raw = sum(raw(c) for c in ids)
@@ -351,6 +362,49 @@ def _rebalance_with_swaps_only(
                 if not vpn_train:
                     break
                 a = vpn_train[0]
+
+            do_swap("train", target, a, b)
+
+    # --- 1.5) NEW: Min VPN HEAVY CAPTURES in val/test ---
+    # This forces at least one "strong VPN" capture into val/test (e.g., vpn_voip_capture1/2/3 in your data).
+    for target, min_heavy in (("val", min_val_vpn_heavy_caps), ("test", min_test_vpn_heavy_caps)):
+        if min_heavy <= 0 or vpn_heavy_trainable_threshold <= 0:
+            continue
+
+        for _ in range(6000):
+            if vpn_heavy_count(splits[target]) >= min_heavy:
+                break
+
+            heavy_train = candidates(
+                splits["train"],
+                is_vpn_heavy,
+                desc=True,
+                allow_giants=True,
+                key_fn=trainable,
+            )
+            if not heavy_train:
+                break
+
+            # Swap out a nonVPN from target (prefer larger raw so we don't shrink target mass too much)
+            nonvpn_target = candidates(
+                splits[target],
+                is_nonvpn,
+                desc=True,
+                allow_giants=False,
+                key_fn=raw,
+            )
+            if not nonvpn_target:
+                break
+
+            a = heavy_train[0]
+            b = nonvpn_target[0]
+
+            # Respect giant policy (rare for VPN heavy in your dataset, but keep it safe)
+            if keep_giants_in_train and is_giant(a):
+                heavy_train = [c for c in heavy_train if not is_giant(c)]
+                if not heavy_train:
+                    break
+                a = heavy_train[0]
 
             do_swap("train", target, a, b)
 
@@ -457,6 +511,7 @@ def make_vnat_capture_split(
           * total size: RAW flow counts (n_flows)
           * vpn signal: TRAINABLE flow counts (n_trainable)
           * giants: RAW flow counts (policy)
+          * NEW: vpn-heavy: TRAINABLE flows per capture (to force strong VPN signal into val/test)
     """
     cfg = _load_cfg(repo_root, splits_yaml)
 
@@ -564,9 +619,16 @@ def make_vnat_capture_split(
     guard = cfg_raw.get("guardrails") or {}
     keep_giants_in_train = bool(guard.get("keep_giants_in_train", True))
     giant_raw_threshold = int(guard.get("giant_flow_threshold", 5000))
+
     min_vpn_caps = guard.get("min_vpn_captures") or {}
     min_val_vpn_caps = int(min_vpn_caps.get("val", cfg.min_val_per_class))
     min_test_vpn_caps = int(min_vpn_caps.get("test", cfg.min_test_per_class))
+
+    # NEW: vpn-heavy guardrail parsing (all optional; defaults keep old behavior)
+    min_vpn_heavy = guard.get("min_vpn_heavy_captures") or {}
+    min_val_vpn_heavy_caps = int(min_vpn_heavy.get("val", 0))
+    min_test_vpn_heavy_caps = int(min_vpn_heavy.get("test", 0))
+    vpn_heavy_trainable_threshold = int(guard.get("vpn_heavy_trainable_threshold", 0))
 
     total_raw_all = int(cap["n_flows"].sum())
     min_val_total_raw = max(val_abs, int(round(val_frac * total_raw_all)))
@@ -583,6 +645,24 @@ def make_vnat_capture_split(
 
     total_vpn_caps = sum(1 for _, v in cap_map_both.items() if v["label"] == 1)
     total_vpn_trainable = sum(v["trainable"] for v in cap_map_both.values() if v["label"] == 1)
+
+    # NEW: feasibility check for vpn-heavy
+    if min_val_vpn_heavy_caps > 0 or min_test_vpn_heavy_caps > 0:
+        if vpn_heavy_trainable_threshold <= 0:
+            raise ValueError(
+                "Invalid guardrail: min_vpn_heavy_captures is set but vpn_heavy_trainable_threshold <= 0. "
+                "Set guardrails.vpn_heavy_trainable_threshold (e.g., 50)."
+            )
+        total_vpn_heavy_caps = sum(
+            1 for v in cap_map_both.values()
+            if v["label"] == 1 and v["trainable"] >= vpn_heavy_trainable_threshold
+        )
+        if min_val_vpn_heavy_caps + min_test_vpn_heavy_caps > total_vpn_heavy_caps:
+            raise ValueError(
+                f"Impossible guardrail: min_vpn_heavy_captures(val)+min_vpn_heavy_captures(test)="
+                f"{min_val_vpn_heavy_caps}+{min_test_vpn_heavy_caps} exceeds total VPN-heavy captures available="
+                f"{total_vpn_heavy_caps} at threshold={vpn_heavy_trainable_threshold}."
+            )
 
     if min_val_vpn_caps + min_test_vpn_caps > total_vpn_caps:
         raise ValueError(
@@ -606,6 +686,8 @@ def make_vnat_capture_split(
         or min_test_total_raw > 0
         or min_val_vpn_caps > 0
         or min_test_vpn_caps > 0
+        or min_val_vpn_heavy_caps > 0
+        or min_test_vpn_heavy_caps > 0
     )
 
     if need_rebalance:
@@ -618,6 +700,10 @@ def make_vnat_capture_split(
             min_test_total_raw=min_test_total_raw,
             min_val_vpn_caps=min_val_vpn_caps,
             min_test_vpn_caps=min_test_vpn_caps,
+            # NEW:
+            min_val_vpn_heavy_caps=min_val_vpn_heavy_caps,
+            min_test_vpn_heavy_caps=min_test_vpn_heavy_caps,
+            vpn_heavy_trainable_threshold=vpn_heavy_trainable_threshold,
             keep_giants_in_train=keep_giants_in_train,
             giant_raw_threshold=giant_raw_threshold,
             seed=cfg.seed + 999,
