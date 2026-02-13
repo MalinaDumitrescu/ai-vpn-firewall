@@ -6,12 +6,12 @@ capture_ratios:
   val: 0.15
   test: 0.15
 
-# Secondary objective: try to approximate TRAINABLE mass ratios
-# (soft objective only; your data is very skewed by a few big nonVPN captures)
+# Make this match what your constraints + VNAT can realistically deliver.
+# Your current achieved trainable ratios are ~0.93/0.038/0.030.
 flow_ratios:
-  train: 0.70
-  val: 0.15
-  test: 0.15
+  train: 0.85   #0.92 #0.70
+  val: 0.07 #0.04  #0.15
+  test: 0.08 #0.04  #0.15
 
 # Your VPN trainable reality:
 # - total trainable VPN = 83, but 80+ of those are basically 1 per capture
@@ -20,16 +20,21 @@ flow_ratios:
 # With strict 70/15/15 *per-class* you would only get ~12-13 VPN captures in val/test,
 # so setting 20 is often too aggressive.
 vpn_trainable_flow_min:
-  val: 30 #10
-  test: 30 #10
+  val: 0 #30 #10
+  test: 0 #30 #10
 
 # Ensure val/test aren't tiny in TOTAL trainable mass (helps avoid "empty" val/test)
 # Use ABSOLUTE counts here (integers).
 min_total_flows:
   val_frac: 0.0
   test_frac: 0.0
-  val_abs: 150      #90  or push it maybe towards 250?
-  test_abs: 400    #250
+  val_abs: 0 #150      #90  or push it maybe towards 250?
+  test_abs: 0 #400    #250
+
+# this is what actually matters for training/tuning
+min_total_trainable_flows:
+  val_abs: 120 #250
+  test_abs: 250
 
 min_captures_per_class:
   train: 10
@@ -47,14 +52,23 @@ guardrails:
     val: 12   #5
     test:  12 #5
 
-  # force meaningful VPN mass into val/test
+    # force meaningful VPN mass into val/test
   min_vpn_heavy_captures:
-    val: 1
-    test: 1
+    val: 0 #1
+    test: 0 #1
   vpn_heavy_trainable_threshold: 50
 
+  # keep enough VPN signal in TRAIN, otherwise training is weak
+vpn_trainable_flow_min_train:
+  train: 300 #180
+
+  # avoid unrealistically VPN-dense val/test for threshold tuning
+max_vpn_fraction_trainable:
+  val: 0.0 #0.25
+  test: 0.0 #0.25
+
 tolerance:
-  abs_flow_ratio: 0.10
+  abs_flow_ratio: 0.20 #0.10
 
 outputs:
   train_list: "data/splits/vnat_train_captures.txt"
