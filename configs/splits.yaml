@@ -1,30 +1,35 @@
 seed: 42
 
-# Primary constraint: capture-count split (70/15/15) at CAPTURE level
+# Primary constraint: keep CAPTURE integrity and overall split sizes (70/15/15)
 capture_ratios:
   train: 0.70
   val: 0.15
   test: 0.15
 
-# Secondary objective: approximate TRAINABLE-flow-mass split (soft objective)
-# IMPORTANT: In code we optimize trainable mass (min_packets_ok==True), not raw n_flows.
+# Secondary objective: try to approximate TRAINABLE mass ratios
+# (soft objective only; your data is very skewed by a few big nonVPN captures)
 flow_ratios:
   train: 0.70
   val: 0.15
   test: 0.15
 
-# Hard minimum VPN signal for calibration/threshold tuning (TRAINABLE flows)
-# Your train scaler fit had 56 trainable VPN in TRAIN, so 120/60 is impossible.
+# Your VPN trainable reality:
+# - total trainable VPN = 83, but 80+ of those are basically 1 per capture
+# - you MUST have VPN present in val/test for threshold tuning
+#
+# With strict 70/15/15 *per-class* you would only get ~12-13 VPN captures in val/test,
+# so setting 20 is often too aggressive.
 vpn_trainable_flow_min:
-  val: 120
-  test: 60
+  val: 10
+  test: 10
 
-# Optional: ensure val/test aren't tiny in total TRAINABLE flow mass.
+# Ensure val/test aren't tiny in TOTAL trainable mass (helps avoid "empty" val/test)
+# Use ABSOLUTE counts here (integers).
 min_total_flows:
   val_frac: 0.0
   test_frac: 0.0
-  val_abs: 0
-  test_abs: 0
+  val_abs: 150      #90  # push it maybe towards 250?
+  test_abs: 400    #250
 
 min_captures_per_class:
   train: 10
@@ -34,17 +39,16 @@ min_captures_per_class:
 giants:
   top_k_per_class: 2
 
-# Guardrails to prevent the failure mode (val/test dominated by a giant)
-# NOTE: giant_flow_threshold applies to TRAINABLE mass now.
+# Guardrails (IMPORTANT: in your code, giant_flow_threshold applies to TRAINABLE mass now)
 guardrails:
   keep_giants_in_train: true
-  giant_flow_threshold: 900   # vimeo has ~1188 trainable -> this catches that case
+  giant_flow_threshold: 900   # catches nonvpn_vimeo_capture1 (1188 trainable)
   min_vpn_captures:
-    val: 5
-    test: 5
+    val: 12   #5
+    test:  12 #5
 
 tolerance:
-  abs_flow_ratio: 0.05
+  abs_flow_ratio: 0.10
 
 outputs:
   train_list: "data/splits/vnat_train_captures.txt"
