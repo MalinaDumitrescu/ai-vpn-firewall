@@ -42,20 +42,20 @@ min_captures_per_class:
   test: 5
 
 giants:
-  top_k_per_class: 2
+  top_k_per_class: 1 #2
 
 # Guardrails (IMPORTANT: in your code, giant_flow_threshold applies to TRAINABLE mass now)
 guardrails:
   keep_giants_in_train: true
-  giant_flow_threshold: 900   # catches nonvpn_vimeo_capture1 (1188 trainable)
+  giant_flow_threshold: 1600 #900   # catches nonvpn_vimeo_capture1 (1188 trainable)
   min_vpn_captures:
     val: 12   #5
     test:  12 #5
 
     # force meaningful VPN mass into val/test
   min_vpn_heavy_captures:
-    val: 0 #1
-    test: 0 #1
+    val: 1 #0 #1
+    test: 1 #0 #1
   vpn_heavy_trainable_threshold: 50
 
   # keep enough VPN signal in TRAIN, otherwise training is weak
@@ -64,8 +64,8 @@ vpn_trainable_flow_min_train:
 
   # avoid unrealistically VPN-dense val/test for threshold tuning
 max_vpn_fraction_trainable:
-  val: 0.0 #0.25
-  test: 0.0 #0.25
+  val: 0.25 #0.0 #0.25
+  test: 0.25 #0.0 #0.25
 
 tolerance:
   abs_flow_ratio: 0.20 #0.10

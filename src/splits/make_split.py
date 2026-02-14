@@ -899,6 +899,10 @@ def make_vnat_capture_split(
         or max_test_vpn_fraction_trainable > 0.0
     )
 
+    print("DEBUG min_total_trainable:", min_val_total_trainable, min_test_total_trainable)
+    print("DEBUG keep_giants_in_train:", keep_giants_in_train, "giant_threshold:", giant_trainable_threshold)
+    print("DEBUG need_rebalance:", need_rebalance)
+
     if need_rebalance:
         final = _rebalance_with_swaps_only(
             final,
