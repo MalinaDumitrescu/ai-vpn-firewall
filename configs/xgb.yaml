@@ -1,0 +1,35 @@
+seed: 42
+
+data:
+  dataset: "vnat"
+  features_filename: "features.parquet"  # under data/processed/vnat/
+  label_col: "label"
+  split_col: "split"
+
+training:
+  split_names:
+    train: "train"
+    val: "val"
+    test: "test"
+  use_scale_pos_weight: true
+  early_stopping_rounds: 200
+  num_boost_round: 4000
+  verbose_eval: 100
+
+xgb_params:
+  objective: "binary:logistic"
+  eval_metric: ["logloss", "auc", "aucpr"]
+  tree_method: "hist"
+  max_depth: 6
+  learning_rate: 0.05
+  subsample: 0.9
+  colsample_bytree: 0.9
+  min_child_weight: 2
+  reg_lambda: 1.0
+  reg_alpha: 0.0
+  gamma: 0.0
+
+outputs:
+  model_path: "artifacts/xgb/model.json"
+  metrics_path: "artifacts/xgb/metrics.json"
+  preds_path: "artifacts/xgb/preds.parquet"

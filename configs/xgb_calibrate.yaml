@@ -1,0 +1,14 @@
+method: "platt"   # platt | isotonic
+
+splits:
+  train: "train"
+  val: "val"
+  test: "test"
+
+inputs:
+  preds_path: "artifacts/xgb/preds.parquet"
+
+outputs:
+  calibrator_path: "artifacts/xgb/calibrator.pkl"
+  metrics_path: "artifacts/xgb/metrics_calibrated.json"
+  preds_calibrated_path: "artifacts/xgb/preds_calibrated.parquet"
