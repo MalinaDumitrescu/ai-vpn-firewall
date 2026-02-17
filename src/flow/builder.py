@@ -2,40 +2,117 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Any, Dict, List, Tuple, Optional
 
-
-FiveTuple = Tuple[str, int, str, int, int]  # src_ip, src_port, dst_ip, dst_port, proto
+FiveTuple = Tuple[str, int, str, int, int]  # ip_a, port_a, ip_b, port_b, proto
+Endpoint = Tuple[str, int]
 
 
 @dataclass
 class _FlowState:
-    connection: FiveTuple
+    connection: FiveTuple            # canonical (stable) orientation A->B
     timestamps: List[float]
     sizes: List[int]
-    directions: List[int]   # 1 forward, 0 reverse
+    directions: List[int]            # 1 = A->B, 0 = B->A
     last_ts: float
+    closed: bool
 
 
 class FlowBuilder:
     """
     Builds bidirectional flows from packets.
 
-    - First packet defines forward direction (connection)
-    - Packets matching forward tuple => direction=1
-    - Packets matching reverse tuple => direction=0
-    - Flow expires if inactive for inactivity_timeout seconds
+    - Canonical keying: A<->B always maps to the same flow key (stable orientation).
+    - direction=1 if packet is A->B in canonical orientation, else 0.
+    - Splits flows on inactivity timeout (finalizes old flow, starts new).
+    - Optional: FIN/RST closes TCP flows early if tcp_flags is provided.
+    - Optional: different inactivity timeouts for TCP and UDP.
     """
 
-    def __init__(self, inactivity_timeout: float = 120.0):
-        self.inactivity_timeout = float(inactivity_timeout)
-        self._tuple_to_flow: Dict[FiveTuple, int] = {}
+    def __init__(
+        self,
+        inactivity_timeout: float = 120.0,
+        *,
+        tcp_timeout: Optional[float] = None,
+        udp_timeout: Optional[float] = None,
+        close_on_fin_rst: bool = True,
+    ):
+        base = float(inactivity_timeout)
+        self.tcp_timeout = float(tcp_timeout) if tcp_timeout is not None else base
+        self.udp_timeout = float(udp_timeout) if udp_timeout is not None else base
+        self.close_on_fin_rst = bool(close_on_fin_rst)
+
+        # canonical FiveTuple -> flow_id
+        self._key_to_flow: Dict[FiveTuple, int] = {}
+
+        # active flows by id
         self._flows: Dict[int, _FlowState] = {}
+
+        # completed flows for output
+        self._done: List[_FlowState] = []
+
         self._next_id: int = 0
 
     @staticmethod
-    def _rev(t: FiveTuple) -> FiveTuple:
-        return (t[2], t[3], t[0], t[1], t[4])
+    def _endpoint(ip: str, port: int) -> Endpoint:
+        return (str(ip), int(port))
+
+    @classmethod
+    def _canonicalize(
+        cls,
+        src_ip: str,
+        src_port: int,
+        dst_ip: str,
+        dst_port: int,
+        proto: int,
+    ) -> Tuple[FiveTuple, int]:
+        """
+        Returns (canonical_five_tuple, direction)
+
+        Canonical orientation is defined by sorting endpoints:
+          A = min((src_ip,src_port), (dst_ip,dst_port))
+          B = max(...)
+
+        direction=1 if packet matches A->B, else 0.
+        """
+        a = cls._endpoint(src_ip, src_port)
+        b = cls._endpoint(dst_ip, dst_port)
+
+        proto_i = int(proto)
+
+        if a <= b:
+            key: FiveTuple = (a[0], a[1], b[0], b[1], proto_i)
+            direction = 1  # src is A
+        else:
+            key = (b[0], b[1], a[0], a[1], proto_i)
+            direction = 0  # src is B (reverse vs canonical)
+        return key, direction
+
+    @staticmethod
+    def _tcp_fin_or_rst(tcp_flags: Any) -> bool:
+        """
+        Accepts:
+        - int bitmask (FIN=0x01, RST=0x04)
+        - scapy flag objects / strings like "FA", "R", "RST"
+        - None
+        """
+        if tcp_flags is None:
+            return False
+
+        if isinstance(tcp_flags, int):
+            flags = tcp_flags
+        else:
+            # scapy sometimes gives flags as string-like
+            s = str(tcp_flags).upper()
+            # quick string test
+            return ("FIN" in s) or ("RST" in s) or ("F" in s) or ("R" in s)
+
+        FIN = 0x01
+        RST = 0x04
+        return bool(flags & FIN) or bool(flags & RST)
+
+    def _timeout_for_proto(self, proto: int) -> float:
+        return self.tcp_timeout if int(proto) == 6 else self.udp_timeout
 
     def add_packet(
         self,
@@ -47,73 +124,89 @@ class FlowBuilder:
         dst_port: int,
         proto: int,
         size: int,
+        tcp_flags: Any = None,
     ) -> None:
         t = float(ts)
-        fwd: FiveTuple = (str(src_ip), int(src_port), str(dst_ip), int(dst_port), int(proto))
-        rev: FiveTuple = self._rev(fwd)
+        proto_i = int(proto)
 
-        # FIX: don't use "or" because flow_id=0 is valid
-        flow_id: Optional[int] = None
-        if fwd in self._tuple_to_flow:
-            flow_id = self._tuple_to_flow[fwd]
-        elif rev in self._tuple_to_flow:
-            flow_id = self._tuple_to_flow[rev]
+        key, direction = self._canonicalize(src_ip, src_port, dst_ip, dst_port, proto_i)
+        flow_id = self._key_to_flow.get(key)
 
+        # existing flow
         if flow_id is not None and flow_id in self._flows:
             st = self._flows[flow_id]
 
-            # Timeout: start a new flow if too much idle time
-            if (t - st.last_ts) > self.inactivity_timeout:
-                self._expire_flow(flow_id)
+            # if already closed, finalize it and start new
+            if st.closed:
+                self._finalize_flow(flow_id)
                 flow_id = None
             else:
-                direction = 1 if fwd == st.connection else 0
-                st.timestamps.append(t)
-                st.sizes.append(int(size))
-                st.directions.append(int(direction))
-                st.last_ts = t
-                return
+                timeout = self._timeout_for_proto(proto_i)
 
-        # Create new flow
+                # inactivity split
+                if (t - st.last_ts) > timeout:
+                    self._finalize_flow(flow_id)
+                    flow_id = None
+                else:
+                    st.timestamps.append(t)
+                    st.sizes.append(int(size))
+                    st.directions.append(int(direction))
+                    st.last_ts = t
+
+                    # optional TCP close
+                    if (
+                        self.close_on_fin_rst
+                        and proto_i == 6
+                        and self._tcp_fin_or_rst(tcp_flags)
+                    ):
+                        st.closed = True
+                        self._finalize_flow(flow_id)
+                    return
+
+        # create new flow
         new_id = self._next_id
         self._next_id += 1
 
         st = _FlowState(
-            connection=fwd,
+            connection=key,
             timestamps=[t],
             sizes=[int(size)],
-            directions=[1],
+            directions=[int(direction)],
             last_ts=t,
+            closed=False,
         )
+
         self._flows[new_id] = st
+        self._key_to_flow[key] = new_id
 
-        # Map both directions
-        self._tuple_to_flow[fwd] = new_id
-        self._tuple_to_flow[self._rev(fwd)] = new_id
+        # if first packet is FIN/RST, close immediately
+        if self.close_on_fin_rst and proto_i == 6 and self._tcp_fin_or_rst(tcp_flags):
+            self._finalize_flow(new_id)
 
-    def _expire_flow(self, flow_id: int) -> None:
+    def _finalize_flow(self, flow_id: int) -> None:
         st = self._flows.pop(flow_id, None)
         if st is None:
             return
 
-        fwd = st.connection
-        rev = self._rev(fwd)
+        key = st.connection
+        if self._key_to_flow.get(key) == flow_id:
+            self._key_to_flow.pop(key, None)
 
-        if self._tuple_to_flow.get(fwd) == flow_id:
-            self._tuple_to_flow.pop(fwd, None)
-        if self._tuple_to_flow.get(rev) == flow_id:
-            self._tuple_to_flow.pop(rev, None)
+        self._done.append(st)
 
     def finalize(self) -> List[Dict[str, Any]]:
-        out: List[Dict[str, Any]] = []
-        for fid in sorted(self._flows.keys()):
-            st = self._flows[fid]
-            out.append(
-                {
-                    "connection": st.connection,
-                    "timestamps": st.timestamps,
-                    "sizes": st.sizes,
-                    "directions": st.directions,
-                }
-            )
-        return out
+        """
+        Finalize ALL remaining active flows and return a list of dicts.
+        """
+        for fid in list(self._flows.keys()):
+            self._finalize_flow(fid)
+
+        return [
+            {
+                "connection": st.connection,
+                "timestamps": st.timestamps,
+                "sizes": st.sizes,
+                "directions": st.directions,
+            }
+            for st in self._done
+        ]

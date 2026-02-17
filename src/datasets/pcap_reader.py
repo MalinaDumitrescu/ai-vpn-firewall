@@ -30,9 +30,15 @@ def iter_packets(pcap_path: str | Path) -> Iterator[Dict[str, Any]]:
             else:
                 continue
 
+            tcp_flags = None
+
             if TCP in pkt:
                 l4 = pkt[TCP]
                 proto = 6
+                try:
+                    tcp_flags = int(l4.flags)
+                except Exception:
+                    tcp_flags = None
             elif UDP in pkt:
                 l4 = pkt[UDP]
                 proto = 17
@@ -55,4 +61,5 @@ def iter_packets(pcap_path: str | Path) -> Iterator[Dict[str, Any]]:
                 "dst_port": dst_port,
                 "proto": proto,
                 "size": size,
+                "tcp_flags": tcp_flags,
             }
