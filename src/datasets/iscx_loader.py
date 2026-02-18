@@ -1,4 +1,3 @@
-# src/datasets/iscx_loader.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,8 +6,8 @@ from typing import Iterator, Tuple, Dict, Any, List
 
 import pandas as pd
 
-from src.datasets.pcap_reader import iter_packets  # you must have / implement this
-from src.flow.builder import FlowBuilder          # your existing builder
+from src.datasets.pcap_reader import iter_packets
+from src.flow.builder import FlowBuilder
 
 
 @dataclass(frozen=True)
@@ -29,7 +28,7 @@ def build_iscx_flows(*, vpn_dir: Path, nonvpn_dir: Path) -> pd.DataFrame:
 
     def process_one(pcap_path: Path, label: int) -> None:
         capture_id = pcap_path.name
-        file_names = pcap_path.name  # keep same naming style as VNAT
+        file_names = pcap_path.name
 
         fb = FlowBuilder()
 
@@ -67,7 +66,7 @@ def build_iscx_flows(*, vpn_dir: Path, nonvpn_dir: Path) -> pd.DataFrame:
                     "sizes": f["sizes"],
                     "directions": f["directions"],
                     "file_names": file_names,
-                    "app": "iscx",          # optional; ISCX doesn’t encode app same way
+                    "app": "iscx",
                     "label": int(label),
                 }
             )
