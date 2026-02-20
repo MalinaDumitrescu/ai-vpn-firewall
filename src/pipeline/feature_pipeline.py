@@ -21,6 +21,9 @@ from src.pipeline.artifacts import (
 ID_COLS = ["flow_id", "capture_id"]
 LABEL_COL = "label"
 
+# Explicitly forbidden columns that should never enter the model
+FORBIDDEN_COLS = {"app", "file_names", "connection_str"}
+
 
 def _ensure_numeric_finite(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -60,8 +63,12 @@ class FeaturePipeline:
         if missing_req:
             raise ValueError(f"Features DF missing required columns: {missing_req}")
 
-        # Feature columns = everything except IDs + label
-        feat_cols = [c for c in df_features.columns if c not in set(ID_COLS + [LABEL_COL])]
+        # Feature columns = everything except IDs + label + forbidden
+        feat_cols = [
+            c for c in df_features.columns 
+            if c not in set(ID_COLS + [LABEL_COL]) and c not in FORBIDDEN_COLS
+        ]
+
         if not feat_cols:
             raise ValueError("No feature columns detected (everything got filtered out).")
 
