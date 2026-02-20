@@ -111,7 +111,7 @@ def _fixed_fpr_threshold(
     Pick the highest threshold that keeps FPR <= fpr_target.
     If impossible, force predict-all-negative using a finite threshold > max(score).
     """
-    fpr, tpr, thr = roc_curve(y_true, y_score)
+    fpr, _tpr, thr = roc_curve(y_true, y_score)
 
     idx = np.where(fpr <= fpr_target)[0]
     if len(idx) == 0:
@@ -139,6 +139,20 @@ def _fixed_fpr_threshold(
         "f1": float(f1),
         "confusion_matrix": {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)},
     }
+
+
+def _key_for_fpr(f: float) -> str:
+    """
+    Produce stable keys:
+      0.001 -> val_fpr_0_1pct
+      0.01  -> val_fpr_1pct
+      0.05  -> val_fpr_5pct
+    """
+    pct = f * 100.0
+    if abs(pct - round(pct)) < 1e-12:
+        return f"val_fpr_{int(round(pct))}pct"
+    s = f"{pct:.1f}".rstrip("0").rstrip(".").replace(".", "_")
+    return f"val_fpr_{s}pct"
 
 
 def train_xgboost(
@@ -169,16 +183,25 @@ def train_xgboost(
     num_boost_round = int(training_cfg.get("num_boost_round", 4000))
     verbose_eval = int(training_cfg.get("verbose_eval", 100))
 
+    # NEW (configurable): policy FPR targets + which one is the "firewall policy"
+    policy_fprs = training_cfg.get("policy_fprs", [0.001, 0.01, 0.05])
+    policy_fprs = [float(x) for x in policy_fprs]
+    firewall_fpr = float(training_cfg.get("firewall_policy", 0.001))
+
     xgb_params = dict(cfg.get("xgb_params") or {})
     xgb_params["seed"] = seed
-
-    # Ensure objective exists (your YAML already has it, but keep this safe)
     xgb_params.setdefault("objective", "binary:logistic")
 
     out_cfg = cfg.get("outputs") or {}
-    model_path = (paths.repo_root / str(out_cfg.get("model_path", "artifacts/xgb/model.json"))).resolve()
-    metrics_path = (paths.repo_root / str(out_cfg.get("metrics_path", "artifacts/xgb/metrics.json"))).resolve()
-    preds_path = (paths.repo_root / str(out_cfg.get("preds_path", "artifacts/xgb/preds.parquet"))).resolve()
+    model_path = (
+        paths.repo_root / str(out_cfg.get("model_path", "artifacts/xgb/model.json"))
+    ).resolve()
+    metrics_path = (
+        paths.repo_root / str(out_cfg.get("metrics_path", "artifacts/xgb/metrics.json"))
+    ).resolve()
+    preds_path = (
+        paths.repo_root / str(out_cfg.get("preds_path", "artifacts/xgb/preds.parquet"))
+    ).resolve()
 
     _ensure_parent(model_path)
     _ensure_parent(metrics_path)
@@ -194,14 +217,10 @@ def train_xgboost(
     if feature_cols is None:
         feature_cols = load_feature_columns(paths)
 
-    # sanity-check the RAW parquet still (NaNs, inf, label/split present, feature cols exist)
     _basic_sanity(df, label_col=label_col, split_col=split_col, feature_cols=feature_cols)
 
-    # ---- NEW: load the feature pipeline and transform df (scaled + column enforced)
     feature_art = default_feature_artifacts(paths.artifacts_dir / "features")
     pipeline = FeaturePipeline.load(feature_art)
-
-    # transform full df once; pipeline should drop non-feature cols internally
     X_all = pipeline.transform(df)
 
     # IMPORTANT: use the pipeline’s model feature order (matches eval)
@@ -211,7 +230,6 @@ def train_xgboost(
     if leaks:
         raise ValueError(f"LEAKAGE: model feature list contains forbidden cols: {leaks}")
 
-    # splits (use indices so we can slice X_all safely)
     train_df = df[df[split_col] == train_name].copy()
     val_df = df[df[split_col] == val_name].copy()
     test_df = df[df[split_col] == test_name].copy()
@@ -234,7 +252,6 @@ def train_xgboost(
     X_test = X_all.loc[test_idx, feature_cols].to_numpy(dtype=float)
     y_test = test_df[label_col].to_numpy(dtype=int)
 
-    # quick sanity: transformed features should be roughly standardized
     print("DEBUG mean/std (first 5):")
     print(np.round(X_train[:, :5].mean(axis=0), 3))
     print(np.round(X_train[:, :5].std(axis=0), 3))
@@ -265,11 +282,48 @@ def train_xgboost(
 
     booster.save_model(str(model_path))
 
-    # Predict using best_iteration
     it_range = (0, int(booster.best_iteration) + 1)
     p_train = booster.predict(dtrain, iteration_range=it_range)
     p_val = booster.predict(dval, iteration_range=it_range)
     p_test = booster.predict(dtest, iteration_range=it_range)
+
+    # ---- Step 6 helper: worst per-capture recall (VNAT only for now)
+    def _worst_per_capture_recall(
+        df_split: pd.DataFrame,
+        probs: np.ndarray,
+        *,
+        thr: float,
+        label_col: str,
+        capture_col: str = "capture_id",
+        top_k: int = 10,
+    ) -> list[dict[str, Any]]:
+        if capture_col not in df_split.columns:
+            return []
+
+        tmp = df_split[[capture_col, label_col]].copy()
+        tmp["p"] = np.asarray(probs, dtype=float)
+        tmp["yhat"] = (tmp["p"] >= float(thr)).astype(int)
+
+        rows: list[dict[str, Any]] = []
+        for cid, g in tmp.groupby(capture_col):
+            pos = g[g[label_col] == 1]
+            if len(pos) == 0:
+                continue
+            tp = int((pos["yhat"] == 1).sum())
+            fn = int((pos["yhat"] == 0).sum())
+            rec = tp / (tp + fn + 1e-9)
+            rows.append(
+                {
+                    "capture_id": str(cid),
+                    "recall": float(rec),
+                    "pos_flows": int(len(pos)),
+                    "tp": tp,
+                    "fn": fn,
+                }
+            )
+
+        rows.sort(key=lambda r: r["recall"])
+        return rows[:top_k]
 
     def pack_split(y: np.ndarray, p: np.ndarray) -> Dict[str, Any]:
         roc = roc_auc_score(y, p) if len(np.unique(y)) > 1 else None
@@ -295,12 +349,35 @@ def train_xgboost(
             },
         }
 
-    # Best score can be str in some versions/metrics
     best_score_raw = booster.best_score
     try:
         best_score = float(best_score_raw) if best_score_raw is not None else None
     except (TypeError, ValueError):
         best_score = None
+
+    # ---- Step 5: firewall-style policy threshold selection (on VAL)
+    policy_thresholds = {
+        _key_for_fpr(f): _fixed_fpr_threshold(y_val, p_val, fpr_target=f)
+        for f in policy_fprs
+    }
+
+    firewall_policy_name = _key_for_fpr(firewall_fpr)
+    if firewall_policy_name not in policy_thresholds:
+        # If user picks a firewall_fpr not in policy_fprs, still compute it.
+        policy_thresholds[firewall_policy_name] = _fixed_fpr_threshold(
+            y_val, p_val, fpr_target=firewall_fpr
+        )
+
+    firewall_thr = float(policy_thresholds[firewall_policy_name]["threshold"])
+
+    worst_capture_recall_test = _worst_per_capture_recall(
+        test_df,
+        p_test,
+        thr=firewall_thr,
+        label_col=label_col,
+        capture_col="capture_id",
+        top_k=10,
+    )
 
     metrics: Dict[str, Any] = {
         "dataset": dataset,
@@ -311,22 +388,28 @@ def train_xgboost(
         "best_score": best_score,
         "scale_pos_weight": None if scale_pos_weight is None else float(scale_pos_weight),
         "feature_cols_n": int(len(feature_cols)),
-        "feature_cols_hash": __import__("hashlib").sha256(",".join(feature_cols).encode("utf-8")).hexdigest(),
+        "feature_cols_hash": __import__("hashlib")
+        .sha256(",".join(feature_cols).encode("utf-8"))
+        .hexdigest(),
         "splits": {
             "train": pack_split(y_train, p_train),
             "val": pack_split(y_val, p_val),
             "test": pack_split(y_test, p_test),
         },
-        "policy_thresholds": {
-            "val_fpr_1pct": _fixed_fpr_threshold(y_val, p_val, fpr_target=0.01),
-            "val_fpr_5pct": _fixed_fpr_threshold(y_val, p_val, fpr_target=0.05),
+        "policy_thresholds": policy_thresholds,
+        "firewall_policy": {
+            "chosen": firewall_policy_name,
+            "fpr_target": firewall_fpr,
+            "threshold": firewall_thr,
+        },
+        "worst_per_capture_recall": {
+            "test": worst_capture_recall_test,
         },
         "evals_result": evals_result,
     }
 
     metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
 
-    # Build preds with explicit index alignment
     preds = pd.DataFrame(index=df.index)
     preds["split"] = df[split_col].astype(str)
     preds["label"] = df[label_col].astype(int)
@@ -347,5 +430,3 @@ def train_xgboost(
         preds_path=preds_path,
         metrics=metrics,
     )
-
-

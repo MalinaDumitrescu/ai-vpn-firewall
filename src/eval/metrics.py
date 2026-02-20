@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 
 import numpy as np
 
@@ -16,7 +15,6 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
-
 
 _EPS = 1e-12
 
@@ -31,6 +29,26 @@ def _to_numpy_1d(x) -> np.ndarray:
 def _safe_probs(p: np.ndarray) -> np.ndarray:
     # clamp to avoid inf in logloss, etc.
     return np.clip(p, _EPS, 1.0 - _EPS)
+
+
+def _policy_key_from_fpr(fpr: float) -> str:
+    """
+    Make stable keys for FPR targets.
+    Examples:
+      0.001 -> fpr_0_1pct
+      0.01  -> fpr_1pct
+      0.05  -> fpr_5pct
+    """
+    pct = float(fpr) * 100.0
+
+    # If it's basically an integer percent, keep it clean
+    if abs(pct - round(pct)) < 1e-12:
+        return f"fpr_{int(round(pct))}pct"
+
+    # Otherwise keep one decimal (0.1%) and swap '.' -> '_'
+    s = f"{pct:.1f}".rstrip("0").rstrip(".")
+    s = s.replace(".", "_")
+    return f"fpr_{s}pct"
 
 
 def confusion_at_threshold(y_true: np.ndarray, p: np.ndarray, thr: float) -> Dict[str, Any]:
@@ -65,9 +83,9 @@ def pick_threshold_for_fpr(y_true: np.ndarray, p: np.ndarray, target_fpr: float)
     y_true = _to_numpy_1d(y_true).astype(int)
     p = _safe_probs(_to_numpy_1d(p).astype(float))
 
-    fpr, tpr, thr = roc_curve(y_true, p)
-    # roc_curve returns thr sorted descending (usually), with an extra inf threshold at start.
-    # We'll scan all finite thresholds.
+    fpr, _tpr, thr = roc_curve(y_true, p)
+
+    # roc_curve returns an inf threshold at start; filter to finite
     finite = np.isfinite(thr)
     fpr = fpr[finite]
     thr = thr[finite]
@@ -79,7 +97,7 @@ def pick_threshold_for_fpr(y_true: np.ndarray, p: np.ndarray, target_fpr: float)
     if ok.size == 0:
         return float(np.max(thr))
 
-    # pick the largest threshold among ok => lowest FPR, most conservative
+    # choose the largest threshold among ok => most conservative
     return float(np.max(thr[ok]))
 
 
@@ -131,7 +149,7 @@ def binary_metrics(
             thr = pick_threshold_for_fpr(y_true, p, target_fpr=float(f))
             rec = confusion_at_threshold(y_true, p, thr)
             rec["fpr_target"] = float(f)
-            pol[f"fpr_{int(round(100*f))}pct"] = rec
+            pol[_policy_key_from_fpr(float(f))] = rec
         out["policy_thresholds"] = pol
 
     return out

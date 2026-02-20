@@ -15,6 +15,10 @@ training:
   early_stopping_rounds: 200
   num_boost_round: 4000
   verbose_eval: 100
+  # NEW: firewall policy targets on validation - added for the cross split on vant and iscx
+  policy_fprs: [0.001, 0.01, 0.05]
+  firewall_policy: 0.001
+
 
 xgb_params:
   objective: "binary:logistic"
