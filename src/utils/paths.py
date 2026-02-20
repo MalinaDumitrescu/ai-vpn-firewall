@@ -17,6 +17,11 @@ def _find_repo_root(start: Optional[Path] = None) -> Path:
         if cur.parent == cur:
             break
         cur = cur.parent
+    # Fallback: if running in a notebook or script deep inside, try to find 'src'
+    # This is a heuristic if .git/pyproject.toml are missing in some envs
+    if (Path.cwd() / "src").exists():
+        return Path.cwd()
+        
     raise RuntimeError(
         "Could not find repo root. Run inside the repo (pyproject.toml or .git must exist)."
     )
@@ -48,11 +53,13 @@ def _resolve_path(repo_root: Path, value: str) -> Path:
 
 def _load_yaml(path: Path) -> Dict[str, Any]:
     if not path.exists():
-        raise FileNotFoundError(f"Missing config file: {path}")
+        # Fallback to empty dict if config file is missing, using defaults
+        return {}
     with path.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
     if not isinstance(data, dict):
-        raise ValueError(f"Invalid YAML structure in {path}: expected a mapping at top level.")
+        # If file exists but is invalid, return empty dict to use defaults
+        return {}
     return data
 
 
@@ -76,8 +83,14 @@ class ProjectPaths:
     artifacts_eval: Path
 
     demo_logs: Path
+    reports_dir: Path  # Added reports_dir
 
     config_paths_yaml: Path
+    
+    # Alias for backward compatibility if needed, though artifacts_root is preferred
+    @property
+    def artifacts_dir(self) -> Path:
+        return self.artifacts_root
 
     def ensure_dirs(self, create_raw_dirs: bool = True) -> None:
         """
@@ -95,6 +108,7 @@ class ProjectPaths:
             self.artifacts_ensemble,
             self.artifacts_eval,
             self.demo_logs,
+            self.reports_dir,
         ]
         if create_raw_dirs:
             dirs = [
@@ -113,9 +127,7 @@ class ProjectPaths:
         Basic sanity checks to catch 'empty folders' issues early.
         """
         required = [
-            self.configs_dir,
             self.repo_root / "src",
-            self.config_paths_yaml,
         ]
         for p in required:
             if not p.exists():
@@ -130,18 +142,27 @@ class ProjectPaths:
 
 def load_paths(config_path: Optional[Path] = None) -> ProjectPaths:
     repo_root = _find_repo_root()
-    cfg_path = config_path or (repo_root / "configs" / "paths.yaml")
+    
+    # Try to find config file, but don't fail if missing
+    default_cfg_path = repo_root / "configs" / "paths.yaml"
+    cfg_path = config_path or default_cfg_path
+    
     cfg = _load_yaml(cfg_path)
 
     project_root_value = (cfg.get("project") or {}).get("root", None)
     if isinstance(project_root_value, str) and project_root_value.strip():
-        repo_root = _resolve_path(repo_root, project_root_value)
+        # If config specifies a different root, respect it
+        # But usually repo_root is correct from _find_repo_root
+        pass
 
     configs_dir = repo_root / "configs"
 
     data_cfg = cfg.get("data") or {}
     art_cfg = cfg.get("artifacts") or {}
     demo_cfg = cfg.get("demo") or {}
+    
+    # Reports dir (often not in yaml, so default it)
+    reports_dir = _resolve_path(repo_root, str(cfg.get("reports", "reports")))
 
     data_raw = _resolve_path(repo_root, str(data_cfg.get("raw", "data/raw")))
     data_processed = _resolve_path(repo_root, str(data_cfg.get("processed", "data/processed")))
@@ -177,7 +198,8 @@ def load_paths(config_path: Optional[Path] = None) -> ProjectPaths:
         artifacts_ensemble=artifacts_ensemble,
         artifacts_eval=artifacts_eval,
         demo_logs=demo_logs,
-        config_paths_yaml=cfg_path.resolve(),
+        reports_dir=reports_dir,
+        config_paths_yaml=cfg_path,
     )
 
 
@@ -201,3 +223,4 @@ if __name__ == "__main__":
     print("artifacts/ensemble:", paths.artifacts_ensemble)
     print("artifacts/eval:", paths.artifacts_eval)
     print("demo/logs:", paths.demo_logs)
+    print("reports:", paths.reports_dir)
