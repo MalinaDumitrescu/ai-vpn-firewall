@@ -223,16 +223,16 @@ def extract_features_from_flows(
             "capture_id": str(r.capture_id),
             "label": int(r.label),
 
-            "f_duration_s": duration,
-            "f_total_pkts": float(pkt_count),
-            "f_up_pkts": float(up_pkts),
-            "f_down_pkts": float(down_pkts),
-            "f_total_bytes": total_bytes,
-            "f_up_bytes": up_bytes,
-            "f_down_bytes": down_bytes,
-
-            "f_pkts_per_s": float(pkt_count) / duration,
-            "f_bytes_per_s": total_bytes / duration,
+            # REMOVED: Absolute duration/volume features that hurt generalization
+            # "f_duration_s": duration,
+            # "f_total_pkts": float(pkt_count),
+            # "f_up_pkts": float(up_pkts),
+            # "f_down_pkts": float(down_pkts),
+            # "f_total_bytes": total_bytes,
+            # "f_up_bytes": up_bytes,
+            # "f_down_bytes": down_bytes,
+            # "f_pkts_per_s": float(pkt_count) / duration,
+            # "f_bytes_per_s": total_bytes / duration,
 
             "f_up_pkt_ratio": float(up_pkt_ratio),
             "f_up_byte_ratio": float(up_byte_ratio),
@@ -242,17 +242,24 @@ def extract_features_from_flows(
 
         # Flatten stats with prefixes
         for k, v in st_sz_all.items():
+            # REMOVED: 'count' and 'sum' from stats (absolute volume)
+            if k in ("count", "sum"): continue
             feat[f"sz_all_{k}"] = v
         for k, v in st_sz_up.items():
+            if k in ("count", "sum"): continue
             feat[f"sz_up_{k}"] = v
         for k, v in st_sz_down.items():
+            if k in ("count", "sum"): continue
             feat[f"sz_down_{k}"] = v
 
         for k, v in st_iat_all.items():
+            if k in ("count", "sum"): continue
             feat[f"iat_all_{k}"] = v
         for k, v in st_iat_up.items():
+            if k in ("count", "sum"): continue
             feat[f"iat_up_{k}"] = v
         for k, v in st_iat_down.items():
+            if k in ("count", "sum"): continue
             feat[f"iat_down_{k}"] = v
 
         # Hist features with stable naming

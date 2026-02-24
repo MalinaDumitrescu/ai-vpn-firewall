@@ -11,8 +11,9 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from src.eval.metrics import group_metrics_by_split
+from src.eval.metrics import group_metrics_by_split, select_policy_thresholds
 from src.eval.calibration import ProbabilityCalibrator, fit_calibrator_from_df, calibration_report
+from src.eval.plots import plot_roc_curves, plot_pr_curves, plot_confusion_matrices, plot_probability_distributions
 
 
 try:
@@ -70,6 +71,46 @@ def _predict_xgb(model_path: Path, df_features: pd.DataFrame, feature_cols: List
     return np.asarray(p, dtype=float)
 
 
+def print_metrics_summary(metrics: Dict[str, Any]) -> None:
+    print("\n" + "="*60)
+    print("EVALUATION SUMMARY")
+    print("="*60)
+    
+    threshold = metrics.get("threshold", 0.5)
+    print(f"Global Threshold: {threshold}")
+    
+    # Handle both "raw" (from evaluate_xgb) and "splits" (from train_xgboost)
+    raw_metrics = metrics.get("raw") or metrics.get("splits")
+    
+    if raw_metrics:
+        print("\n--- Raw Probabilities ---")
+        for split, m in raw_metrics.items():
+            print(f"\nSplit: {split.upper()}")
+            print(f"  N: {m.get('n', 'N/A')} (Pos: {m.get('pos', 'N/A')}, Neg: {m.get('neg', 'N/A')})")
+            print(f"  ROC AUC: {m.get('roc_auc', 'N/A')}")
+            print(f"  PR AUC:  {m.get('pr_auc', 'N/A')}")
+            
+            thr_metrics = m.get(f"threshold_{threshold}", {})
+            if thr_metrics:
+                print(f"  At Threshold {threshold}:")
+                print(f"    Precision: {thr_metrics.get('precision', 'N/A')}")
+                print(f"    Recall:    {thr_metrics.get('recall', 'N/A')}")
+                print(f"    F1 Score:  {thr_metrics.get('f1', 'N/A')}")
+                cm = thr_metrics.get('confusion_matrix', {})
+                print(f"    Confusion Matrix: TN={cm.get('tn')}, FP={cm.get('fp')}, FN={cm.get('fn')}, TP={cm.get('tp')}")
+
+    if "calibrated" in metrics:
+        print("\n--- Calibrated Probabilities ---")
+        for split, m in metrics["calibrated"].items():
+            print(f"\nSplit: {split.upper()}")
+            print(f"  ROC AUC: {m.get('roc_auc', 'N/A')}")
+            print(f"  PR AUC:  {m.get('pr_auc', 'N/A')}")
+            print(f"  Brier:   {m.get('brier', 'N/A')}")
+            print(f"  LogLoss: {m.get('logloss', 'N/A')}")
+
+    print("="*60 + "\n")
+
+
 @dataclass(frozen=True)
 class EvalOutputs:
     preds_path: Path
@@ -85,10 +126,12 @@ def evaluate_xgb(
     out_dir: Path,
     threshold: float = 0.5,
     policy_fprs: tuple[float, ...] = (0.01, 0.05),
+    policy_mode: str = "max_recall_under_fpr",
     calibrate: bool = False,
     calib_method: str = "platt",
     calib_fit_split: str = "val",
     calibrator_path: Optional[Path] = None,
+    policy_fit_split: str = "val",
 ) -> EvalOutputs:
     _ensure_exists(features_parquet)
     _ensure_exists(model_path)
@@ -97,6 +140,8 @@ def evaluate_xgb(
     out_dir.mkdir(parents=True, exist_ok=True)
     preds_path = out_dir / "preds.parquet"
     metrics_path = out_dir / "metrics_eval.json"
+    plots_dir = out_dir / "plots"
+    plots_dir.mkdir(exist_ok=True)
 
     df = pd.read_parquet(features_parquet)
     for c in ["split", "label", "flow_id", "capture_id"]:
@@ -130,6 +175,22 @@ def evaluate_xgb(
 
     preds.to_parquet(preds_path, index=False)
 
+    # --- Policy Threshold Selection ---
+    fixed_thresholds = None
+    if policy_fit_split in preds["split"].unique():
+        fixed_thresholds = select_policy_thresholds(
+            preds,
+            label_col="label",
+            prob_col="p_raw",
+            split_col="split",
+            split_name=policy_fit_split,
+            policy_fprs=policy_fprs,
+            policy_mode=policy_mode
+        )
+    else:
+        print(f"WARNING: Policy fit split '{policy_fit_split}' not found in data. "
+              f"Policy thresholds will be computed per-split (potentially optimistic).")
+
     # Metrics
     metrics: Dict[str, Any] = {
         "inputs": {
@@ -139,6 +200,9 @@ def evaluate_xgb(
         },
         "threshold": float(threshold),
         "policy_fprs": [float(x) for x in policy_fprs],
+        "policy_mode": policy_mode,
+        "policy_fit_split": policy_fit_split,
+        "fixed_policy_thresholds": fixed_thresholds,
         "raw": group_metrics_by_split(
             preds.rename(columns={"p_raw": "p"}),
             label_col="label",
@@ -146,10 +210,24 @@ def evaluate_xgb(
             split_col="split",
             threshold=threshold,
             policy_fprs=policy_fprs,
+            policy_mode=policy_mode,
+            fixed_policy_thresholds=fixed_thresholds,
         ),
     }
 
     if calibrate and "p_calib" in preds.columns:
+        fixed_calib_thresholds = None
+        if policy_fit_split in preds["split"].unique():
+            fixed_calib_thresholds = select_policy_thresholds(
+                preds,
+                label_col="label",
+                prob_col="p_calib",
+                split_col="split",
+                split_name=policy_fit_split,
+                policy_fprs=policy_fprs,
+                policy_mode=policy_mode
+            )
+
         metrics["calibrated"] = group_metrics_by_split(
             preds.rename(columns={"p_calib": "p"}),
             label_col="label",
@@ -157,6 +235,8 @@ def evaluate_xgb(
             split_col="split",
             threshold=threshold,
             policy_fprs=policy_fprs,
+            policy_mode=policy_mode,
+            fixed_policy_thresholds=fixed_calib_thresholds,
         )
         metrics["calibration_report"] = calibration_report(
             preds,
@@ -177,6 +257,17 @@ def evaluate_xgb(
 
     metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
 
+    # --- Plotting ---
+    prob_col = "p_calib" if calibrate and "p_calib" in preds.columns else "p_raw"
+    
+    plot_roc_curves(preds, prob_col=prob_col, save_path=plots_dir / "roc_curves.png")
+    plot_pr_curves(preds, prob_col=prob_col, save_path=plots_dir / "pr_curves.png")
+    plot_confusion_matrices(preds, prob_col=prob_col, threshold=threshold, save_dir=plots_dir)
+    plot_probability_distributions(preds, prob_col=prob_col, save_dir=plots_dir)
+
+    # --- Console Output ---
+    print_metrics_summary(metrics)
+
     return EvalOutputs(preds_path=preds_path, metrics_path=metrics_path, metrics=metrics)
 
 
@@ -189,6 +280,8 @@ def build_argparser() -> argparse.ArgumentParser:
 
     ap.add_argument("--threshold", type=float, default=0.5)
     ap.add_argument("--policy_fprs", type=str, default="0.01,0.05", help="Comma-separated FPR targets (e.g. 0.01,0.05)")
+    ap.add_argument("--policy_mode", type=str, default="max_recall_under_fpr", choices=["max_recall_under_fpr", "most_conservative"])
+    ap.add_argument("--policy_fit_split", type=str, default="val", help="Split name to use for selecting policy thresholds (default: val)")
 
     ap.add_argument("--calibrate", action="store_true", help="Enable probability calibration")
     ap.add_argument("--calib_method", type=str, default="platt", choices=["platt", "isotonic"])
@@ -211,10 +304,12 @@ def main() -> None:
         out_dir=Path(args.out_dir),
         threshold=float(args.threshold),
         policy_fprs=policy_fprs,
+        policy_mode=str(args.policy_mode),
         calibrate=bool(args.calibrate),
         calib_method=str(args.calib_method),
         calib_fit_split=str(args.calib_fit_split),
         calibrator_path=calibrator_path,
+        policy_fit_split=str(args.policy_fit_split),
     )
 
     print("Saved preds :", res.preds_path)

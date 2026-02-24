@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, Literal, Optional
 
 import numpy as np
 
@@ -75,10 +75,23 @@ def confusion_at_threshold(y_true: np.ndarray, p: np.ndarray, thr: float) -> Dic
     }
 
 
-def pick_threshold_for_fpr(y_true: np.ndarray, p: np.ndarray, target_fpr: float) -> float:
+def pick_threshold_for_fpr(
+    y_true: np.ndarray,
+    p: np.ndarray,
+    target_fpr: float,
+    mode: Literal["max_recall_under_fpr", "most_conservative"] = "max_recall_under_fpr",
+) -> float:
     """
-    Choose the highest threshold that achieves fpr <= target_fpr.
-    If no threshold achieves it, returns the max threshold (most conservative).
+    Choose a threshold that achieves fpr <= target_fpr.
+
+    Modes:
+      - "max_recall_under_fpr" (default): Pick the LOWEST threshold that keeps FPR <= target.
+        This maximizes Recall (TPR) while respecting the FPR constraint.
+      - "most_conservative": Pick the HIGHEST threshold that keeps FPR <= target.
+        This minimizes False Positives as much as possible, potentially sacrificing Recall.
+
+    If no threshold achieves FPR <= target (e.g. even max threshold has high FPR?),
+    returns a very high threshold (1.0 or slightly above max score) to force 0 predictions.
     """
     y_true = _to_numpy_1d(y_true).astype(int)
     p = _safe_probs(_to_numpy_1d(p).astype(float))
@@ -86,19 +99,69 @@ def pick_threshold_for_fpr(y_true: np.ndarray, p: np.ndarray, target_fpr: float)
     fpr, _tpr, thr = roc_curve(y_true, p)
 
     # roc_curve returns an inf threshold at start; filter to finite
-    finite = np.isfinite(thr)
-    fpr = fpr[finite]
-    thr = thr[finite]
+    # However, we might need that 'inf' if we want to predict all-zeros.
+    # Let's handle finite thresholds for selection.
+    finite_mask = np.isfinite(thr)
+    fpr_finite = fpr[finite_mask]
+    thr_finite = thr[finite_mask]
 
-    if thr.size == 0:
-        return 1.0
+    if thr_finite.size == 0:
+        # No finite thresholds? Just return something > 1.0
+        return 1.000001
 
-    ok = np.where(fpr <= float(target_fpr))[0]
-    if ok.size == 0:
-        return float(np.max(thr))
+    # Find indices where FPR constraint is met
+    ok_indices = np.where(fpr_finite <= float(target_fpr))[0]
 
-    # choose the largest threshold among ok => most conservative
-    return float(np.max(thr[ok]))
+    if ok_indices.size == 0:
+        # Impossible to satisfy FPR constraint with any finite threshold?
+        # Return a threshold > max(p) to predict all 0s (FPR=0).
+        return float(np.max(p) + 1e-6)
+
+    valid_thresholds = thr_finite[ok_indices]
+
+    if mode == "max_recall_under_fpr":
+        # Lowest threshold => Highest Recall
+        return float(np.min(valid_thresholds))
+    elif mode == "most_conservative":
+        # Highest threshold => Lowest FPR (safest)
+        return float(np.max(valid_thresholds))
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
+
+
+def select_policy_thresholds(
+    df,
+    *,
+    label_col: str = "label",
+    prob_col: str = "p",
+    split_col: str = "split",
+    split_name: str = "val",
+    policy_fprs: Tuple[float, ...] = (0.01, 0.05),
+    policy_mode: Literal["max_recall_under_fpr", "most_conservative"] = "max_recall_under_fpr",
+) -> Dict[str, float]:
+    """
+    Selects thresholds based on a specific split (usually 'val').
+    Returns a dict mapping policy key (e.g. 'fpr_1pct') to the chosen threshold.
+    """
+    import pandas as pd
+
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("df must be a pandas DataFrame.")
+
+    subset = df[df[split_col] == split_name]
+    if len(subset) == 0:
+        raise ValueError(f"Split '{split_name}' not found or empty in dataframe.")
+
+    y = subset[label_col].to_numpy()
+    p = subset[prob_col].to_numpy()
+
+    thresholds = {}
+    for f in policy_fprs:
+        thr = pick_threshold_for_fpr(y, p, target_fpr=float(f), mode=policy_mode)
+        key = _policy_key_from_fpr(float(f))
+        thresholds[key] = thr
+
+    return thresholds
 
 
 def binary_metrics(
@@ -108,10 +171,15 @@ def binary_metrics(
     threshold: float = 0.5,
     compute_policy_thresholds: bool = True,
     policy_fprs: Tuple[float, ...] = (0.01, 0.05),
+    policy_mode: Literal["max_recall_under_fpr", "most_conservative"] = "max_recall_under_fpr",
+    fixed_policy_thresholds: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     """
     Main one-stop metric function for binary classification.
     Returns ROC-AUC, PR-AUC, logloss, brier, and threshold-based metrics.
+
+    If fixed_policy_thresholds is provided (dict of key->thr), we use those thresholds
+    instead of computing new ones from the data.
     """
     y_true = _to_numpy_1d(y_true).astype(int)
     p = _safe_probs(_to_numpy_1d(p).astype(float))
@@ -134,6 +202,14 @@ def binary_metrics(
                 "note": "Only one class present in y_true; ROC/PR AUC undefined.",
             }
         )
+        # Even if one class is missing, we can still compute confusion metrics for fixed thresholds
+        if fixed_policy_thresholds:
+            pol: Dict[str, Any] = {}
+            for key, thr in fixed_policy_thresholds.items():
+                rec = confusion_at_threshold(y_true, p, thr)
+                rec["fixed_threshold_used"] = True
+                pol[key] = rec
+            out["policy_thresholds"] = pol
         return out
 
     out["roc_auc"] = float(roc_auc_score(y_true, p))
@@ -143,10 +219,20 @@ def binary_metrics(
 
     out["threshold_0.5"] = confusion_at_threshold(y_true, p, threshold)
 
-    if compute_policy_thresholds:
+    if fixed_policy_thresholds:
+        # Use pre-computed thresholds (e.g. from val split)
+        pol: Dict[str, Any] = {}
+        for key, thr in fixed_policy_thresholds.items():
+            rec = confusion_at_threshold(y_true, p, thr)
+            rec["fixed_threshold_used"] = True
+            pol[key] = rec
+        out["policy_thresholds"] = pol
+
+    elif compute_policy_thresholds:
+        # Compute thresholds on THIS data (potentially optimistic if this is test set)
         pol: Dict[str, Any] = {}
         for f in policy_fprs:
-            thr = pick_threshold_for_fpr(y_true, p, target_fpr=float(f))
+            thr = pick_threshold_for_fpr(y_true, p, target_fpr=float(f), mode=policy_mode)
             rec = confusion_at_threshold(y_true, p, thr)
             rec["fpr_target"] = float(f)
             pol[_policy_key_from_fpr(float(f))] = rec
@@ -163,6 +249,8 @@ def group_metrics_by_split(
     split_col: str = "split",
     threshold: float = 0.5,
     policy_fprs: Tuple[float, ...] = (0.01, 0.05),
+    policy_mode: Literal["max_recall_under_fpr", "most_conservative"] = "max_recall_under_fpr",
+    fixed_policy_thresholds: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     """
     Compute metrics for each split in a single dataframe.
@@ -183,7 +271,12 @@ def group_metrics_by_split(
         y = g[label_col].to_numpy()
         p = g[prob_col].to_numpy()
         out["splits"][str(split_name)] = binary_metrics(
-            y, p, threshold=threshold, policy_fprs=policy_fprs
+            y,
+            p,
+            threshold=threshold,
+            policy_fprs=policy_fprs,
+            policy_mode=policy_mode,
+            fixed_policy_thresholds=fixed_policy_thresholds,
         )
 
     return out

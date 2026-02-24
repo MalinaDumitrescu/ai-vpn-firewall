@@ -6,6 +6,13 @@ from typing import Dict, Any, Optional
 
 from src.pipeline.artifacts import default_feature_artifacts
 from src.pipeline.feature_pipeline import FeaturePipeline
+from src.eval.metrics import (
+    pick_threshold_for_fpr,
+    confusion_at_threshold,
+    _policy_key_from_fpr,
+    select_policy_thresholds,
+    binary_metrics,
+)
 
 import json
 import numpy as np
@@ -17,7 +24,6 @@ from sklearn.metrics import (
     average_precision_score,
     confusion_matrix,
     precision_recall_fscore_support,
-    roc_curve,
 )
 
 try:
@@ -104,57 +110,6 @@ def _basic_sanity(
         raise ValueError("Found NaNs in split column.")
 
 
-def _fixed_fpr_threshold(
-    y_true: np.ndarray, y_score: np.ndarray, fpr_target: float
-) -> Dict[str, Any]:
-    """
-    Pick the highest threshold that keeps FPR <= fpr_target.
-    If impossible, force predict-all-negative using a finite threshold > max(score).
-    """
-    fpr, _tpr, thr = roc_curve(y_true, y_score)
-
-    idx = np.where(fpr <= fpr_target)[0]
-    if len(idx) == 0:
-        threshold = float(np.nextafter(np.max(y_score), np.inf))
-    else:
-        threshold = float(thr[int(idx[-1])])
-        if not np.isfinite(threshold):
-            threshold = float(np.nextafter(np.max(y_score), np.inf))
-
-    y_pred = (y_score >= threshold).astype(int)
-    tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
-
-    precision, recall, f1, _ = precision_recall_fscore_support(
-        y_true, y_pred, average="binary", zero_division=0
-    )
-
-    achieved_fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
-
-    return {
-        "threshold": float(threshold),
-        "fpr_target": float(fpr_target),
-        "fpr_achieved": float(achieved_fpr),
-        "precision": float(precision),
-        "recall": float(recall),
-        "f1": float(f1),
-        "confusion_matrix": {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)},
-    }
-
-
-def _key_for_fpr(f: float) -> str:
-    """
-    Produce stable keys:
-      0.001 -> val_fpr_0_1pct
-      0.01  -> val_fpr_1pct
-      0.05  -> val_fpr_5pct
-    """
-    pct = f * 100.0
-    if abs(pct - round(pct)) < 1e-12:
-        return f"val_fpr_{int(round(pct))}pct"
-    s = f"{pct:.1f}".rstrip("0").rstrip(".").replace(".", "_")
-    return f"val_fpr_{s}pct"
-
-
 def train_xgboost(
     *,
     paths,
@@ -187,6 +142,7 @@ def train_xgboost(
     policy_fprs = training_cfg.get("policy_fprs", [0.001, 0.01, 0.05])
     policy_fprs = [float(x) for x in policy_fprs]
     firewall_fpr = float(training_cfg.get("firewall_policy", 0.001))
+    policy_mode = str(training_cfg.get("policy_mode", "max_recall_under_fpr"))
 
     xgb_params = dict(cfg.get("xgb_params") or {})
     xgb_params["seed"] = seed
@@ -325,30 +281,6 @@ def train_xgboost(
         rows.sort(key=lambda r: r["recall"])
         return rows[:top_k]
 
-    def pack_split(y: np.ndarray, p: np.ndarray) -> Dict[str, Any]:
-        roc = roc_auc_score(y, p) if len(np.unique(y)) > 1 else None
-        ap = average_precision_score(y, p) if len(np.unique(y)) > 1 else None
-
-        yhat = (p >= 0.5).astype(int)
-        tn, fp, fn, tp = confusion_matrix(y, yhat, labels=[0, 1]).ravel()
-        precision, recall, f1, _ = precision_recall_fscore_support(
-            y, yhat, average="binary", zero_division=0
-        )
-
-        return {
-            "n": int(len(y)),
-            "pos": int((y == 1).sum()),
-            "neg": int((y == 0).sum()),
-            "roc_auc": None if roc is None else float(roc),
-            "pr_auc": None if ap is None else float(ap),
-            "threshold_0.5": {
-                "precision": float(precision),
-                "recall": float(recall),
-                "f1": float(f1),
-                "confusion_matrix": {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)},
-            },
-        }
-
     best_score_raw = booster.best_score
     try:
         best_score = float(best_score_raw) if best_score_raw is not None else None
@@ -356,19 +288,42 @@ def train_xgboost(
         best_score = None
 
     # ---- Step 5: firewall-style policy threshold selection (on VAL)
-    policy_thresholds = {
-        _key_for_fpr(f): _fixed_fpr_threshold(y_val, p_val, fpr_target=f)
-        for f in policy_fprs
-    }
+    # Use the shared implementation now
+    
+    # 1. Create a temporary dataframe for threshold selection
+    val_df_for_sel = pd.DataFrame({
+        split_col: [val_name] * len(y_val),
+        label_col: y_val,
+        "p": p_val
+    })
+    
+    # 2. Select thresholds using ONLY the validation split
+    # Ensure firewall_fpr is in the list of FPRs to compute
+    all_fprs = sorted(list(set(policy_fprs + [firewall_fpr])))
+    
+    selected_thresholds = select_policy_thresholds(
+        val_df_for_sel,
+        label_col=label_col,
+        prob_col="p",
+        split_col=split_col,
+        split_name=val_name,
+        policy_fprs=tuple(all_fprs),
+        policy_mode=policy_mode
+    )
 
-    firewall_policy_name = _key_for_fpr(firewall_fpr)
-    if firewall_policy_name not in policy_thresholds:
-        # If user picks a firewall_fpr not in policy_fprs, still compute it.
-        policy_thresholds[firewall_policy_name] = _fixed_fpr_threshold(
-            y_val, p_val, fpr_target=firewall_fpr
+    firewall_policy_name = _policy_key_from_fpr(firewall_fpr)
+    firewall_thr = selected_thresholds[firewall_policy_name]
+
+    # 3. Compute metrics for all splits using these FIXED thresholds
+    # We'll use binary_metrics directly for each split to ensure consistency
+    
+    def pack_split_with_fixed_thresholds(y: np.ndarray, p: np.ndarray) -> Dict[str, Any]:
+        return binary_metrics(
+            y, 
+            p, 
+            threshold=0.5, 
+            fixed_policy_thresholds=selected_thresholds
         )
-
-    firewall_thr = float(policy_thresholds[firewall_policy_name]["threshold"])
 
     worst_capture_recall_test = _worst_per_capture_recall(
         test_df,
@@ -392,15 +347,16 @@ def train_xgboost(
         .sha256(",".join(feature_cols).encode("utf-8"))
         .hexdigest(),
         "splits": {
-            "train": pack_split(y_train, p_train),
-            "val": pack_split(y_val, p_val),
-            "test": pack_split(y_test, p_test),
+            "train": pack_split_with_fixed_thresholds(y_train, p_train),
+            "val": pack_split_with_fixed_thresholds(y_val, p_val),
+            "test": pack_split_with_fixed_thresholds(y_test, p_test),
         },
-        "policy_thresholds": policy_thresholds,
+        "policy_thresholds": {k: {"threshold": v} for k, v in selected_thresholds.items()}, # Simplified for summary
         "firewall_policy": {
             "chosen": firewall_policy_name,
             "fpr_target": firewall_fpr,
             "threshold": firewall_thr,
+            "mode": policy_mode,
         },
         "worst_per_capture_recall": {
             "test": worst_capture_recall_test,
@@ -421,6 +377,9 @@ def train_xgboost(
     preds.loc[train_df.index, "p_xgb"] = p_train
     preds.loc[val_df.index, "p_xgb"] = p_val
     preds.loc[test_df.index, "p_xgb"] = p_test
+    
+    # Standardize on p_raw
+    preds["p_raw"] = preds["p_xgb"]
 
     preds.reset_index(drop=True).to_parquet(preds_path, index=False)
 

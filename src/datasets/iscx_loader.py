@@ -72,10 +72,16 @@ def build_iscx_flows(*, vpn_dir: Path, nonvpn_dir: Path) -> pd.DataFrame:
                 }
             )
 
-    for p in _list_pcaps(vpn_dir):
+    # Process VPN files (label=1)
+    vpn_files = _list_pcaps(vpn_dir)
+    print(f"Found {len(vpn_files)} VPN pcaps in {vpn_dir}")
+    for p in vpn_files:
         process_one(p, label=1)
 
-    for p in _list_pcaps(nonvpn_dir):
+    # Process Non-VPN files (label=0)
+    nonvpn_files = _list_pcaps(nonvpn_dir)
+    print(f"Found {len(nonvpn_files)} Non-VPN pcaps in {nonvpn_dir}")
+    for p in nonvpn_files:
         process_one(p, label=0)
 
     return pd.DataFrame(rows)
