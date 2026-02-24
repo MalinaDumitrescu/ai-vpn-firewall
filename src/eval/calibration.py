@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional
+import datetime
 
 import numpy as np
 import joblib
@@ -26,6 +27,7 @@ class ProbabilityCalibrator:
     """
     method: CalibMethod = "platt"
     model: Any = None  # LogisticRegression or IsotonicRegression
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def fit(self, p_raw: np.ndarray, y: np.ndarray) -> "ProbabilityCalibrator":
         p_raw = _safe_probs(np.asarray(p_raw, dtype=float).reshape(-1))
@@ -59,14 +61,30 @@ class ProbabilityCalibrator:
 
         raise ValueError(f"Unknown calibration method: {self.method}")
 
-    def save(self, path: Path) -> None:
+    def save(self, path: Path, extra_metadata: Optional[Dict[str, Any]] = None) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump({"method": self.method, "model": self.model}, path)
+        
+        meta = self.metadata.copy()
+        if extra_metadata:
+            meta.update(extra_metadata)
+        
+        # Ensure timestamp is present
+        if "timestamp" not in meta:
+            meta["timestamp"] = datetime.datetime.now().isoformat()
+
+        joblib.dump({
+            "method": self.method, 
+            "model": self.model,
+            "metadata": meta
+        }, path)
 
     @staticmethod
     def load(path: Path) -> "ProbabilityCalibrator":
         obj = joblib.load(path)
-        cal = ProbabilityCalibrator(method=obj["method"])
+        cal = ProbabilityCalibrator(
+            method=obj.get("method", "platt"),
+            metadata=obj.get("metadata", {})
+        )
         cal.model = obj["model"]
         return cal
 
@@ -94,7 +112,17 @@ def fit_calibrator_from_df(
     if len(g) == 0:
         raise ValueError(f"No rows found for fit_split='{fit_split}'.")
 
-    cal = ProbabilityCalibrator(method=method).fit(g[prob_col].to_numpy(), g[label_col].to_numpy())
+    cal = ProbabilityCalibrator(method=method)
+    cal.fit(g[prob_col].to_numpy(), g[label_col].to_numpy())
+    
+    # Auto-populate some metadata
+    cal.metadata = {
+        "fit_split": str(fit_split),
+        "n_samples": len(g),
+        "prob_col": prob_col,
+        "method": method
+    }
+
     return cal
 
 

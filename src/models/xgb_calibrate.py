@@ -5,15 +5,10 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import json
-import numpy as np
 import pandas as pd
 import yaml
 
-from sklearn.linear_model import LogisticRegression
-from sklearn.isotonic import IsotonicRegression
-from sklearn.metrics import roc_auc_score, average_precision_score, confusion_matrix
-
-import joblib
+from src.eval.calibration import fit_calibrator_from_df, calibration_report
 
 
 @dataclass(frozen=True)
@@ -32,35 +27,6 @@ def _ensure_parent(p: Path) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
 
 
-def _evaluate(split_df: pd.DataFrame, prob_col: str) -> Dict[str, Any]:
-    y = split_df["label"].to_numpy(dtype=int)
-    p = split_df[prob_col].to_numpy(dtype=float)
-
-    # Guard: if split has only one class, AUC is undefined
-    if len(np.unique(y)) < 2:
-        roc = None
-        pr = None
-    else:
-        roc = float(roc_auc_score(y, p))
-        pr = float(average_precision_score(y, p))
-
-    y_hat = (p >= 0.5).astype(int)
-    tn, fp, fn, tp = confusion_matrix(y, y_hat, labels=[0, 1]).ravel()
-
-    precision = float(tp / (tp + fp + 1e-9))
-    recall = float(tp / (tp + fn + 1e-9))
-
-    return {
-        "roc_auc": roc,
-        "pr_auc": pr,
-        "threshold_0.5": {
-            "precision": precision,
-            "recall": recall,
-            "confusion_matrix": {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)},
-        },
-    }
-
-
 def calibrate_xgb_predictions(
     *,
     paths,
@@ -68,11 +34,12 @@ def calibrate_xgb_predictions(
     df_preds: Optional[pd.DataFrame] = None,
 ) -> CalibrateResult:
     """
-    Calibrate XGBoost probabilities (p_xgb) using validation split only.
+    Calibrate XGBoost probabilities (p_raw/p_xgb) using validation split only.
+    Uses src.eval.calibration.ProbabilityCalibrator for consistency.
 
     Input:
       artifacts/xgb/preds.parquet with columns:
-        split, label, p_xgb (+ optional flow_id, capture_id)
+        split, label, p_raw (or p_xgb) (+ optional flow_id, capture_id)
 
     Output:
       artifacts/xgb/calibrator.pkl
@@ -86,9 +53,7 @@ def calibrate_xgb_predictions(
         raise ValueError("method must be one of: platt, isotonic")
 
     splits = cfg.get("splits") or {}
-    train_name = str(splits.get("train", "train"))
     val_name = str(splits.get("val", "val"))
-    test_name = str(splits.get("test", "test"))
 
     in_cfg = cfg.get("inputs") or {}
     preds_rel = str(in_cfg.get("preds_path", "artifacts/xgb/preds.parquet"))
@@ -115,87 +80,55 @@ def calibrate_xgb_predictions(
             )
         df_preds = pd.read_parquet(preds_path)
 
-    required = {"split", "label", "p_xgb"}
+    # Determine prob column
+    prob_col = "p_raw"
+    if "p_raw" not in df_preds.columns:
+        if "p_xgb" in df_preds.columns:
+            prob_col = "p_xgb"
+        else:
+            raise ValueError("preds.parquet missing probability column (p_raw or p_xgb)")
+
+    required = {"split", "label", prob_col}
     missing = required - set(df_preds.columns)
     if missing:
         raise ValueError(f"preds.parquet missing required columns: {missing}")
 
-    # Split
-    train_df = df_preds[df_preds["split"] == train_name].copy()
-    val_df = df_preds[df_preds["split"] == val_name].copy()
-    test_df = df_preds[df_preds["split"] == test_name].copy()
+    # 1. Fit Calibrator on Validation Split
+    calibrator = fit_calibrator_from_df(
+        df_preds,
+        prob_col=prob_col,
+        label_col="label",
+        split_col="split",
+        fit_split=val_name,
+        method=method,
+    )
 
-    if len(val_df) == 0:
-        raise ValueError("Validation split is empty. Cannot calibrate.")
-    if val_df["label"].nunique() < 2:
-        raise ValueError(
-            "Validation split has only one class (all 0 or all 1). "
-            "Platt/Isotonic calibration needs both classes."
-        )
+    # 2. Apply Calibration to All Splits
+    df_out = df_preds.copy()
+    df_out["p_calib"] = calibrator.predict(df_out[prob_col].to_numpy())
 
-    x_val = val_df["p_xgb"].to_numpy(dtype=float)
-
-    if method == "platt":
-        X = x_val.reshape(-1, 1)
-        y = val_df["label"].to_numpy(dtype=int)
-        calibrator = LogisticRegression(solver="lbfgs")
-        calibrator.fit(X, y)
-
-        def predict_proba(x: np.ndarray) -> np.ndarray:
-            return calibrator.predict_proba(x.reshape(-1, 1))[:, 1]
-
-        calibrator_info = {
-            "type": "LogisticRegression",
-            "coef": calibrator.coef_.tolist(),
-            "intercept": calibrator.intercept_.tolist(),
-        }
-
-    else:
-        y = val_df["label"].to_numpy(dtype=int)
-        calibrator = IsotonicRegression(out_of_bounds="clip")
-        calibrator.fit(x_val, y)
-
-        def predict_proba(x: np.ndarray) -> np.ndarray:
-            return calibrator.predict(x)
-
-        calibrator_info = {"type": "IsotonicRegression"}
-
-    def apply(df_: pd.DataFrame) -> pd.DataFrame:
-        x = df_["p_xgb"].to_numpy(dtype=float)
-        df_["p_calib"] = predict_proba(x)
-        return df_
-
-    train_df = apply(train_df)
-    val_df = apply(val_df)
-    test_df = apply(test_df)
-
-    # Metrics (raw vs calibrated)
-    metrics: Dict[str, Any] = {
-        "calibration": {
-            "method": method,
-            "fitted_on": "val",
-            "val_pos": int(val_df["label"].sum()),
-            "val_neg": int((val_df["label"] == 0).sum()),
-            "calibrator_info": calibrator_info,
-        },
-        "raw": {
-            "val": _evaluate(val_df, "p_xgb"),
-            "test": _evaluate(test_df, "p_xgb"),
-        },
-        "calibrated": {
-            "val": _evaluate(val_df, "p_calib"),
-            "test": _evaluate(test_df, "p_calib"),
-        },
+    # 3. Compute Metrics
+    metrics = calibration_report(
+        df_out,
+        raw_col=prob_col,
+        calib_col="p_calib",
+        label_col="label",
+        split_col="split",
+        threshold=0.5,
+    )
+    
+    # Add metadata about the calibration run
+    metrics["calibration_info"] = {
+        "method": method,
+        "fit_split": val_name,
+        "n_samples_fit": calibrator.metadata.get("n_samples", 0),
+        "calibrator_path": str(calibrator_path),
+        "input_prob_col": prob_col,
     }
 
-    joblib.dump(calibrator, calibrator_path)
+    # 4. Save Artifacts
+    calibrator.save(calibrator_path, extra_metadata={"source": "xgb_calibrate.py"})
     metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
-
-    df_out = df_preds.copy()
-    df_out.loc[df_out["split"] == train_name, "p_calib"] = train_df["p_calib"].to_numpy()
-    df_out.loc[df_out["split"] == val_name, "p_calib"] = val_df["p_calib"].to_numpy()
-    df_out.loc[df_out["split"] == test_name, "p_calib"] = test_df["p_calib"].to_numpy()
-
     df_out.to_parquet(preds_calibrated_path, index=False)
 
     return CalibrateResult(

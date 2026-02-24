@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Dict, Any
 
 import numpy as np
 import pandas as pd
@@ -20,6 +20,8 @@ from src.pipeline.artifacts import (
 
 ID_COLS = ["flow_id", "capture_id"]
 LABEL_COL = "label"
+SPLIT_COL = "split"
+DATASET_COL = "dataset"
 
 # Explicitly forbidden columns that should never enter the model
 FORBIDDEN_COLS = {"app", "file_names", "connection_str"}
@@ -56,24 +58,32 @@ class FeaturePipeline:
     scale_cols: Optional[List[str]] = None
     passthrough_cols: Optional[List[str]] = None
     scaler: Optional[StandardScaler] = None
+    metadata: Optional[Dict[str, Any]] = None
 
-    def fit(self, df_features: pd.DataFrame) -> "FeaturePipeline":
+    def fit(self, df_features: pd.DataFrame, fit_provenance: Optional[Dict[str, Any]] = None) -> "FeaturePipeline":
         # Required columns
         missing_req = [c for c in (ID_COLS + [LABEL_COL]) if c not in df_features.columns]
         if missing_req:
             raise ValueError(f"Features DF missing required columns: {missing_req}")
 
-        # Feature columns = everything except IDs + label + forbidden
-        feat_cols = [
-            c for c in df_features.columns 
-            if c not in set(ID_COLS + [LABEL_COL]) and c not in FORBIDDEN_COLS
-        ]
+        # Identify all columns that are NOT features
+        # Ensure we only try to drop columns that actually exist in df_features
+        cols_to_exclude_from_features = set(ID_COLS + [LABEL_COL, SPLIT_COL, DATASET_COL]) | FORBIDDEN_COLS
+        
+        # Create a temporary DataFrame containing only the potential feature columns
+        # by dropping the known non-feature columns.
+        X_potential_features = df_features.drop(
+            columns=[col for col in cols_to_exclude_from_features if col in df_features.columns],
+            errors='ignore' # Ignore if a column to drop doesn't exist
+        ).copy()
+
+        feat_cols = list(X_potential_features.columns)
 
         if not feat_cols:
             raise ValueError("No feature columns detected (everything got filtered out).")
 
-        # Enforce numeric + finite on feature columns only
-        X = _ensure_numeric_finite(df_features[feat_cols])
+        # Enforce numeric + finite on these feature columns
+        X_processed = _ensure_numeric_finite(X_potential_features)
 
         # Explicit passthrough policy: only q_* columns (quality flags)
         passthrough = [c for c in feat_cols if c.startswith("q_")]
@@ -84,12 +94,13 @@ class FeaturePipeline:
         # It's OK if passthrough is empty.
 
         scaler = StandardScaler(with_mean=True, with_std=True)
-        scaler.fit(X[scale].to_numpy(dtype=float))
+        scaler.fit(X_processed[scale].to_numpy(dtype=float)) # Use X_processed here
 
         self.feature_cols = feat_cols
         self.scale_cols = scale
         self.passthrough_cols = passthrough
         self.scaler = scaler
+        self.metadata = fit_provenance or {}
         return self
 
     def model_feature_names(self) -> List[str]:
@@ -112,18 +123,22 @@ class FeaturePipeline:
 
         strict=True:
           - raises if any expected feature columns are missing (recommended for thesis/eval runs)
+          - raises if any unexpected columns are present (to prevent leakage/schema drift)
 
         strict=False:
           - fills missing expected feature columns with 0.0 and continues (useful for debugging)
+          - ignores unexpected columns
         """
         if self.feature_cols is None or self.scale_cols is None or self.passthrough_cols is None or self.scaler is None:
             raise RuntimeError("Pipeline is not fitted. Call fit() first or load() artifacts.")
 
-        for c in ID_COLS + [LABEL_COL]:
+        # The split column is not required for transforming, so we don't check for it.
+        required_cols = ID_COLS + [LABEL_COL]
+        for c in required_cols:
             if c not in df_features.columns:
                 raise ValueError(f"Features DF missing required column: {c}")
 
-        out = df_features[ID_COLS + [LABEL_COL]].copy()
+        out = df_features[required_cols].copy()
 
         # Check/fill missing expected feature columns
         missing_feats = [c for c in self.feature_cols if c not in df_features.columns]
@@ -132,6 +147,19 @@ class FeaturePipeline:
                 f"Missing {len(missing_feats)} expected feature columns at transform. "
                 f"Examples: {missing_feats[:10]}"
             )
+        
+        # Check for unexpected columns (Strict Mode)
+        if strict:
+            # Allowed: ID cols, Label, Split, Dataset, Forbidden (ignored), and Expected Features
+            allowed = set(ID_COLS + [LABEL_COL, SPLIT_COL, DATASET_COL]) | FORBIDDEN_COLS | set(self.feature_cols)
+            current = set(df_features.columns)
+            unexpected = current - allowed
+            if unexpected:
+                raise ValueError(
+                    f"Strict mode: Input contains {len(unexpected)} unexpected columns not seen at fit time. "
+                    f"Examples: {sorted(list(unexpected))[:10]}\n"
+                    "This ensures you are not accidentally passing new features that the model ignores."
+                )
 
         X = df_features.copy()
         for c in missing_feats:
@@ -165,6 +193,7 @@ class FeaturePipeline:
             "model_feature_order": self.model_feature_names(),
             "id_cols": ID_COLS,
             "label_col": LABEL_COL,
+            "metadata": self.metadata,
         }
         save_json(art.feature_columns_json, meta)
         save_pickle(art.scaler_pkl, self.scaler)
@@ -182,12 +211,14 @@ class FeaturePipeline:
                 scale_cols=meta,
                 passthrough_cols=[],
                 scaler=scaler,
+                metadata={},
             )
 
         # New format: dict with explicit scale/passthrough
         feature_cols = meta["feature_cols"]
         scale_cols = meta["scale_cols"]
         passthrough_cols = meta.get("passthrough_cols", [])
+        metadata = meta.get("metadata", {})
 
         # Safety: ensure no overlap and preserve order as stored
         overlap = set(scale_cols).intersection(passthrough_cols)
@@ -199,4 +230,5 @@ class FeaturePipeline:
             scale_cols=scale_cols,
             passthrough_cols=passthrough_cols,
             scaler=scaler,
+            metadata=metadata,
         )
