@@ -241,25 +241,25 @@ def extract_features_from_flows(
         }
 
         # Flatten stats with prefixes
+        # REMOVED: 'count', 'sum', 'min', 'max' to avoid overfitting to specific capture artifacts
         for k, v in st_sz_all.items():
-            # REMOVED: 'count' and 'sum' from stats (absolute volume)
-            if k in ("count", "sum"): continue
+            if k in ("count", "sum", "min", "max"): continue
             feat[f"sz_all_{k}"] = v
         for k, v in st_sz_up.items():
-            if k in ("count", "sum"): continue
+            if k in ("count", "sum", "min", "max"): continue
             feat[f"sz_up_{k}"] = v
         for k, v in st_sz_down.items():
-            if k in ("count", "sum"): continue
+            if k in ("count", "sum", "min", "max"): continue
             feat[f"sz_down_{k}"] = v
 
         for k, v in st_iat_all.items():
-            if k in ("count", "sum"): continue
+            if k in ("count", "sum", "min", "max"): continue
             feat[f"iat_all_{k}"] = v
         for k, v in st_iat_up.items():
-            if k in ("count", "sum"): continue
+            if k in ("count", "sum", "min", "max"): continue
             feat[f"iat_up_{k}"] = v
         for k, v in st_iat_down.items():
-            if k in ("count", "sum"): continue
+            if k in ("count", "sum", "min", "max"): continue
             feat[f"iat_down_{k}"] = v
 
         # Hist features with stable naming
