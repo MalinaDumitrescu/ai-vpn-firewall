@@ -1,0 +1,38 @@
+seed: 42
+
+data:
+  dataset: "vnat"
+  features_filename: "features.parquet"
+  label_col: "label"
+  split_col: "split"
+
+training:
+  split_names:
+    train: "train"
+    val: "val"
+    test: "test"
+  use_scale_pos_weight: true
+  early_stopping_rounds: 200
+  num_boost_round: 4000
+  verbose_eval: 100
+  policy_fprs: [0.001, 0.01, 0.05]
+  firewall_policy: 0.001
+
+catboost_params:
+  loss_function: "Logloss"
+  eval_metric: "AUC"
+  depth: 4
+  learning_rate: 0.05
+  subsample: 0.8
+  colsample_bylevel: 0.8 # Equivalent to colsample_bytree
+  min_data_in_leaf: 5 # Equivalent to min_child_weight
+  reg_lambda: 2.0
+  iterations: 4000
+  early_stopping_rounds: 200
+  verbose: 100
+  allow_writing_files: False
+
+outputs:
+  model_path: "artifacts/catboost/model.cbm"
+  metrics_path: "artifacts/catboost/metrics.json"
+  preds_path: "artifacts/catboost/preds.parquet"
