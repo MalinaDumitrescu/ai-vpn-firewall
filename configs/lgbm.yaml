@@ -1,0 +1,37 @@
+seed: 42
+
+data:
+  dataset: "vnat"
+  features_filename: "features.parquet"
+  label_col: "label"
+  split_col: "split"
+
+training:
+  split_names:
+    train: "train"
+    val: "val"
+    test: "test"
+  use_scale_pos_weight: true
+  early_stopping_rounds: 200
+  num_boost_round: 4000
+  verbose_eval: 100
+  policy_fprs: [0.001, 0.01, 0.05]
+  firewall_policy: 0.001
+
+lgbm_params:
+  objective: "binary"
+  metric: ["binary_logloss", "auc"]
+  boosting_type: "gbdt"
+  max_depth: 4
+  learning_rate: 0.05
+  subsample: 0.8
+  colsample_bytree: 0.8
+  min_child_samples: 5
+  reg_lambda: 2.0
+  reg_alpha: 0.0
+  num_leaves: 16  # 2^max_depth
+
+outputs:
+  model_path: "artifacts/lgbm/model.txt"
+  metrics_path: "artifacts/lgbm/metrics.json"
+  preds_path: "artifacts/lgbm/preds.parquet"

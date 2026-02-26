@@ -1,0 +1,19 @@
+models:
+  - "xgb"
+  - "lgbm"
+  - "catboost"
+
+data:
+  label_col: "label"
+  split_col: "split"
+
+training:
+  split_names:
+    val: "val"
+  policy_fprs: [0.001, 0.01, 0.05]
+  firewall_policy: 0.001
+  policy_mode: "max_recall_under_fpr"
+
+outputs:
+  preds_path: "artifacts/ensemble/preds.parquet"
+  metrics_path: "artifacts/ensemble/metrics.json"
