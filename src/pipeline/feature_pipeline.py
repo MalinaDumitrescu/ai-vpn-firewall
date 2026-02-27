@@ -26,6 +26,9 @@ DATASET_COL = "dataset"
 # Explicitly forbidden columns that should never enter the model
 FORBIDDEN_COLS = {"app", "file_names", "connection_str"}
 
+# Columns to explicitly exclude from model features (e.g. quality flags that are constant or not behavioral)
+EXCLUDE_FROM_MODEL = {"q_min_packets_ok"}
+
 
 def _ensure_numeric_finite(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -68,7 +71,7 @@ class FeaturePipeline:
 
         # Identify all columns that are NOT features
         # Ensure we only try to drop columns that actually exist in df_features
-        cols_to_exclude_from_features = set(ID_COLS + [LABEL_COL, SPLIT_COL, DATASET_COL]) | FORBIDDEN_COLS
+        cols_to_exclude_from_features = set(ID_COLS + [LABEL_COL, SPLIT_COL, DATASET_COL]) | FORBIDDEN_COLS | EXCLUDE_FROM_MODEL
         
         # Create a temporary DataFrame containing only the potential feature columns
         # by dropping the known non-feature columns.
@@ -150,8 +153,8 @@ class FeaturePipeline:
         
         # Check for unexpected columns (Strict Mode)
         if strict:
-            # Allowed: ID cols, Label, Split, Dataset, Forbidden (ignored), and Expected Features
-            allowed = set(ID_COLS + [LABEL_COL, SPLIT_COL, DATASET_COL]) | FORBIDDEN_COLS | set(self.feature_cols)
+            # Allowed: ID cols, Label, Split, Dataset, Forbidden (ignored), Excluded, and Expected Features
+            allowed = set(ID_COLS + [LABEL_COL, SPLIT_COL, DATASET_COL]) | FORBIDDEN_COLS | EXCLUDE_FROM_MODEL | set(self.feature_cols)
             current = set(df_features.columns)
             unexpected = current - allowed
             if unexpected:
