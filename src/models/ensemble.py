@@ -124,8 +124,7 @@ def create_ensemble(
 
     # Apply weights to create ensemble predictions
     df_preds["p_ensemble"] = np.dot(df_preds[pred_cols].to_numpy(), optimal_weights)
-    df_preds["p_raw"] = df_preds["p_ensemble"] # for compatibility with downstream tools
-
+    
     # --- CALIBRATION (Moved INSIDE create_ensemble) ---
     # We must calibrate BEFORE selecting thresholds to ensure the thresholds match the deployed scores.
     print("Calibrating ensemble probabilities (internal step)...")
@@ -144,6 +143,9 @@ def create_ensemble(
     all_X = df_preds["p_ensemble"].values.reshape(-1, 1)
     df_preds["p_calib"] = calibrator.predict_proba(all_X)[:, 1]
     
+    # Standardize on p_raw = p_calib for consistency with other models
+    df_preds["p_raw"] = df_preds["p_calib"]
+
     # --- Metrics ---
     # IMPORTANT: Re-select the validation set AFTER adding p_calib
     df_val_final = df_preds[df_preds[split_col] == val_name].copy()
