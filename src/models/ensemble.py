@@ -10,8 +10,9 @@ import yaml
 import json
 from scipy.optimize import minimize
 from sklearn.metrics import roc_auc_score
+from sklearn.linear_model import LogisticRegression
 
-from src.eval.metrics import binary_metrics, select_policy_thresholds, _policy_key_from_fpr
+from src.eval.metrics import binary_metrics, select_policy_thresholds, _policy_key_from_fpr, _safe_probs
 
 
 @dataclass(frozen=True)
@@ -125,14 +126,32 @@ def create_ensemble(
     df_preds["p_ensemble"] = np.dot(df_preds[pred_cols].to_numpy(), optimal_weights)
     df_preds["p_raw"] = df_preds["p_ensemble"] # for compatibility with downstream tools
 
+    # --- CALIBRATION (Moved INSIDE create_ensemble) ---
+    # We must calibrate BEFORE selecting thresholds to ensure the thresholds match the deployed scores.
+    print("Calibrating ensemble probabilities (internal step)...")
+    
+    # Re-select validation set AFTER adding p_ensemble
+    df_val_for_calib = df_preds[df_preds[split_col] == val_name].copy()
+    
+    # Fit calibrator on validation set
+    calib_X = df_val_for_calib["p_ensemble"].values.reshape(-1, 1)
+    calib_y = df_val_for_calib[label_col].values
+    
+    calibrator = LogisticRegression(solver="lbfgs")
+    calibrator.fit(calib_X, calib_y)
+    
+    # Apply to all data
+    all_X = df_preds["p_ensemble"].values.reshape(-1, 1)
+    df_preds["p_calib"] = calibrator.predict_proba(all_X)[:, 1]
+    
     # --- Metrics ---
-    # IMPORTANT: Re-select the validation set AFTER adding p_ensemble
+    # IMPORTANT: Re-select the validation set AFTER adding p_calib
     df_val_final = df_preds[df_preds[split_col] == val_name].copy()
     
     val_df_for_sel = pd.DataFrame({
         split_col: df_val_final[split_col],
         label_col: df_val_final[label_col],
-        "p": df_val_final["p_ensemble"]
+        "p": df_val_final["p_calib"]  # Use CALIBRATED probs for threshold selection
     })
     
     all_fprs = sorted(list(set(policy_fprs + [firewall_fpr])))
@@ -166,7 +185,7 @@ def create_ensemble(
     for split_name in df_preds[split_col].unique():
         df_split = df_preds[df_preds[split_col] == split_name]
         y = df_split[label_col].to_numpy()
-        p = df_split["p_ensemble"].to_numpy()
+        p = df_split["p_calib"].to_numpy() # Evaluate on CALIBRATED probs
         metrics["splits"][split_name] = binary_metrics(y, p, threshold=0.5, fixed_policy_thresholds=selected_thresholds)
 
     metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")

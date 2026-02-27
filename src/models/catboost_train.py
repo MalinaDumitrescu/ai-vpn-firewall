@@ -18,6 +18,7 @@ import json
 import numpy as np
 import pandas as pd
 import yaml
+from sklearn.linear_model import LogisticRegression
 
 from sklearn.metrics import (
     roc_auc_score,
@@ -278,11 +279,26 @@ def train_catboost(
 
     best_score = float(model.get_best_score()['validation']['AUC'])
 
+    # --- CALIBRATION (Moved INSIDE train_catboost) ---
+    print("Calibrating CatBoost probabilities (internal step)...")
+    
+    # Fit calibrator on validation set
+    calib_X = p_val.reshape(-1, 1)
+    calib_y = y_val
+    
+    calibrator = LogisticRegression(solver="lbfgs")
+    calibrator.fit(calib_X, calib_y)
+    
+    # Apply to all splits
+    p_train_calib = calibrator.predict_proba(p_train.reshape(-1, 1))[:, 1]
+    p_val_calib = calibrator.predict_proba(p_val.reshape(-1, 1))[:, 1]
+    p_test_calib = calibrator.predict_proba(p_test.reshape(-1, 1))[:, 1]
+
     # ---- Step 5: firewall-style policy threshold selection (on VAL)
     val_df_for_sel = pd.DataFrame({
         split_col: [val_name] * len(y_val),
         label_col: y_val,
-        "p": p_val
+        "p": p_val_calib
     })
     
     all_fprs = sorted(list(set(policy_fprs + [firewall_fpr])))
@@ -310,7 +326,7 @@ def train_catboost(
 
     worst_capture_recall_test = _worst_per_capture_recall(
         test_df,
-        p_test,
+        p_test_calib,
         thr=firewall_thr,
         label_col=label_col,
         capture_col="capture_id",
@@ -330,9 +346,9 @@ def train_catboost(
         .sha256(",".join(feature_cols).encode("utf-8"))
         .hexdigest(),
         "splits": {
-            "train": pack_split_with_fixed_thresholds(y_train, p_train),
-            "val": pack_split_with_fixed_thresholds(y_val, p_val),
-            "test": pack_split_with_fixed_thresholds(y_test, p_test),
+            "train": pack_split_with_fixed_thresholds(y_train, p_train_calib),
+            "val": pack_split_with_fixed_thresholds(y_val, p_val_calib),
+            "test": pack_split_with_fixed_thresholds(y_test, p_test_calib),
         },
         "policy_thresholds": {k: {"threshold": v} for k, v in selected_thresholds.items()},
         "firewall_policy": {
@@ -361,7 +377,11 @@ def train_catboost(
     preds.loc[val_df.index, "p_catboost"] = p_val
     preds.loc[test_df.index, "p_catboost"] = p_test
     
-    preds["p_raw"] = preds["p_catboost"]
+    # Standardize on p_raw (which is now the calibrated probability)
+    preds["p_raw"] = np.nan
+    preds.loc[train_df.index, "p_raw"] = p_train_calib
+    preds.loc[val_df.index, "p_raw"] = p_val_calib
+    preds.loc[test_df.index, "p_raw"] = p_test_calib
 
     preds.reset_index(drop=True).to_parquet(preds_path, index=False)
 
