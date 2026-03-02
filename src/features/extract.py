@@ -201,8 +201,18 @@ def extract_features_from_flows(
 
         # Ratios (avoid div by 0)
         eps = cfg.eps
-        up_pkt_ratio = up_pkts / max(pkt_count, 1)
-        up_byte_ratio = up_bytes / max(total_bytes, eps)
+        # CHANGED: Direction-invariant ratios
+        # Instead of up/total, we use min(up, down) / max(up, down) to capture imbalance without direction
+        # And max(up, down) / total to capture dominance
+        
+        # Avoid division by zero
+        max_pkts = max(up_pkts, down_pkts)
+        min_pkts = min(up_pkts, down_pkts)
+        pkt_imbalance = min_pkts / max(max_pkts, 1)
+
+        max_bytes = max(up_bytes, down_bytes)
+        min_bytes = min(up_bytes, down_bytes)
+        byte_imbalance = min_bytes / max(max_bytes, eps)
 
         # Histograms
         h_size_all = fixed_hist(sz, size_spec)
@@ -223,19 +233,9 @@ def extract_features_from_flows(
             "capture_id": str(r.capture_id),
             "label": int(r.label),
 
-            # REMOVED: Absolute duration/volume features that hurt generalization
-            # "f_duration_s": duration,
-            # "f_total_pkts": float(pkt_count),
-            # "f_up_pkts": float(up_pkts),
-            # "f_down_pkts": float(down_pkts),
-            # "f_total_bytes": total_bytes,
-            # "f_up_bytes": up_bytes,
-            # "f_down_bytes": down_bytes,
-            # "f_pkts_per_s": float(pkt_count) / duration,
-            # "f_bytes_per_s": total_bytes / duration,
-
-            "f_up_pkt_ratio": float(up_pkt_ratio),
-            "f_up_byte_ratio": float(up_byte_ratio),
+            # CHANGED: Replaced directional ratios with invariant ones
+            "f_pkt_imbalance": float(pkt_imbalance),
+            "f_byte_imbalance": float(byte_imbalance),
 
             "f_iat_burstiness": _burstiness(iat_all),
         }
@@ -245,22 +245,30 @@ def extract_features_from_flows(
         for k, v in st_sz_all.items():
             if k in ("count", "sum", "min", "max"): continue
             feat[f"sz_all_{k}"] = v
-        for k, v in st_sz_up.items():
-            if k in ("count", "sum", "min", "max"): continue
-            feat[f"sz_up_{k}"] = v
-        for k, v in st_sz_down.items():
-            if k in ("count", "sum", "min", "max"): continue
-            feat[f"sz_down_{k}"] = v
+        
+        # CHANGED: Direction-invariant stats
+        # Instead of up/down, we aggregate them into "primary" (larger volume) and "secondary" (smaller volume)
+        # Or just use "all" stats + imbalance ratios.
+        # For simplicity and robustness, we will DROP separate up/down stats and rely on "all" + imbalance.
+        # This is the strongest way to force direction invariance.
+        
+        # If we really want distributional info per direction without directionality, we can sort them.
+        # e.g. "larger_mean", "smaller_mean".
+        # Let's try adding "max_mean" and "min_mean" for size/iat if they differ significantly.
+        
+        feat["sz_mean_max"] = max(st_sz_up["mean"], st_sz_down["mean"])
+        feat["sz_mean_min"] = min(st_sz_up["mean"], st_sz_down["mean"])
+        feat["sz_std_max"] = max(st_sz_up["std"], st_sz_down["std"]) # Not necessarily from same direction as mean_max
+        feat["sz_std_min"] = min(st_sz_up["std"], st_sz_down["std"])
 
         for k, v in st_iat_all.items():
             if k in ("count", "sum", "min", "max"): continue
             feat[f"iat_all_{k}"] = v
-        for k, v in st_iat_up.items():
-            if k in ("count", "sum", "min", "max"): continue
-            feat[f"iat_up_{k}"] = v
-        for k, v in st_iat_down.items():
-            if k in ("count", "sum", "min", "max"): continue
-            feat[f"iat_down_{k}"] = v
+            
+        feat["iat_mean_max"] = max(st_iat_up["mean"], st_iat_down["mean"])
+        feat["iat_mean_min"] = min(st_iat_up["mean"], st_iat_down["mean"])
+        feat["iat_std_max"] = max(st_iat_up["std"], st_iat_down["std"])
+        feat["iat_std_min"] = min(st_iat_up["std"], st_iat_down["std"])
 
         # Hist features with stable naming
         for i, v in enumerate(h_size_all):
