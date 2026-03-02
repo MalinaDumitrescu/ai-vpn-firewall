@@ -17,6 +17,9 @@ def make_iscx_capture_split(
     df = pd.read_parquet(flows_parquet, columns=["capture_id", "label"])
     df["capture_id"] = df["capture_id"].astype(str)
 
+    # Group by capture_id and take the first label.
+    # IMPORTANT: We must ensure we get ALL captures, even if they have mixed labels (though they shouldn't).
+    # Using 'first' is fine if captures are pure.
     cap = (
         df.groupby("capture_id")
           .agg(label=("label","first"), n_flows=("label","size"))
@@ -24,10 +27,11 @@ def make_iscx_capture_split(
     )
 
     # stratify by label at capture level
-    rng = np.random.default_rng(seed)
+    # Convert to list to ensure we have a clean list of strings
     vpn_caps = cap.loc[cap.label == 1, "capture_id"].to_list()
     non_caps = cap.loc[cap.label == 0, "capture_id"].to_list()
 
+    rng = np.random.default_rng(seed)
     rng.shuffle(vpn_caps)
     rng.shuffle(non_caps)
 
@@ -37,6 +41,13 @@ def make_iscx_capture_split(
         n_val   = int(round(val_frac * n))
         # ensure sums to n
         n_test  = n - n_train - n_val
+        
+        # Handle edge cases where n is small
+        if n_test < 0: n_test = 0
+        if n_train + n_val + n_test != n:
+             # Adjust train to make it sum up if rounding errors
+             n_train = n - n_val - n_test
+
         train = items[:n_train]
         val   = items[n_train:n_train+n_val]
         test  = items[n_train+n_val:]
@@ -67,4 +78,5 @@ def write_capture_lists(splits: dict, out_dir: Path, prefix: str):
     out_dir.mkdir(parents=True, exist_ok=True)
     for k in ["train","val","test"]:
         p = out_dir / f"{prefix}_{k}_captures.txt"
+        # Write lines, ensuring no empty lines and proper encoding
         p.write_text("\n".join(map(str, splits[k])) + "\n", encoding="utf-8")

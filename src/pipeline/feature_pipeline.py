@@ -181,6 +181,11 @@ class FeaturePipeline:
             Xp = X[self.passthrough_cols].copy()
         else:
             Xp = pd.DataFrame(index=df_features.index)
+        
+        # CHANGED: Include q_min_packets_ok in output if it exists in input, even if not a model feature
+        # This is needed for filtering later in the notebook
+        if "q_min_packets_ok" in df_features.columns and "q_min_packets_ok" not in out.columns:
+             out["q_min_packets_ok"] = df_features["q_min_packets_ok"]
 
         # Output: IDs + label + model features (scaled first, then passthrough)
         return pd.concat([out, Xs, Xp], axis=1)
