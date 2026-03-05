@@ -198,7 +198,7 @@ def binary_metrics(
                 "pr_auc": None,
                 "logloss": float(log_loss(y_true, p, labels=[0, 1])),
                 "brier": float(brier_score_loss(y_true, p)),
-                "threshold_0.5": confusion_at_threshold(y_true, p, threshold),
+                "firewall_policy": confusion_at_threshold(y_true, p, threshold),
                 "note": "Only one class present in y_true; ROC/PR AUC undefined.",
             }
         )
@@ -217,7 +217,8 @@ def binary_metrics(
     out["logloss"] = float(log_loss(y_true, p, labels=[0, 1]))
     out["brier"] = float(brier_score_loss(y_true, p))
 
-    out["threshold_0.5"] = confusion_at_threshold(y_true, p, threshold)
+    # CHANGED: Use "firewall_policy" key instead of "threshold_0.5"
+    out["firewall_policy"] = confusion_at_threshold(y_true, p, threshold)
 
     if fixed_policy_thresholds:
         # Use pre-computed thresholds (e.g. from val split)

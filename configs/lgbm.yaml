@@ -22,14 +22,17 @@ lgbm_params:
   objective: "binary"
   metric: ["binary_logloss", "auc"]
   boosting_type: "gbdt"
-  max_depth: 4
-  learning_rate: 0.05
-  subsample: 0.8
-  colsample_bytree: 0.8
-  min_child_samples: 5
-  reg_lambda: 2.0
-  reg_alpha: 0.0
-  num_leaves: 16  # 2^max_depth
+  max_depth: 3 # Reduced from 4
+  learning_rate: 0.03 # Reduced from 0.05
+  subsample: 0.7 # Reduced from 0.8
+  colsample_bytree: 0.7 # Reduced from 0.8
+  min_child_samples: 20 # Increased from 5
+  reg_lambda: 5.0 # Increased from 2.0
+  reg_alpha: 1.0 # Increased from 0.0
+  num_leaves: 8  # Reduced from 16
+  feature_fraction: 0.7 # Explicitly added
+  bagging_fraction: 0.7 # Explicitly added
+  bagging_freq: 1 # Explicitly added
 
 outputs:
   model_path: "artifacts/lgbm/model.txt"

@@ -146,7 +146,8 @@ def create_ensemble(
     # (Assuming all models were trained on same splits/flows)
     base_df = pd.read_parquet(paths.artifacts_dir / model_names[0] / "preds.parquet")
     # Check if base_df has the metadata
-    meta_cols = ["flow_id", label_col, split_col, "capture_id"]
+    # CHANGED: Added "dataset" to meta_cols to preserve it for evaluation
+    meta_cols = ["flow_id", label_col, split_col, "capture_id", "dataset"]
     # Filter to available columns
     meta_cols = [c for c in meta_cols if c in base_df.columns]
     
@@ -214,7 +215,7 @@ def create_ensemble(
         split_metrics[str(sp)] = binary_metrics(
             y_sp, 
             p_sp, 
-            threshold=0.5, 
+            threshold=firewall_thr, # Use firewall threshold for main metrics
             fixed_policy_thresholds=selected_thresholds
         )
 

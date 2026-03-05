@@ -144,15 +144,11 @@ def train_catboost(
     firewall_fpr = float(training_cfg.get("firewall_policy", 0.001))
     policy_mode = str(training_cfg.get("policy_mode", "max_recall_under_fpr"))
 
-    cb_params = dict(cfg.get("catboost_params") or {})
-    cb_params["random_seed"] = seed
-    cb_params.setdefault("loss_function", "Logloss")
-    cb_params.setdefault("eval_metric", "AUC")
-    cb_params.setdefault("iterations", num_boost_round)
-    cb_params.setdefault("early_stopping_rounds", early_stopping_rounds)
-    cb_params.setdefault("verbose", verbose_eval)
-    cb_params.setdefault("allow_writing_files", False)
-
+    catboost_params = dict(cfg.get("catboost_params") or {})
+    catboost_params["random_seed"] = seed
+    # CatBoost uses 'iterations' instead of num_boost_round in params usually, but we pass it to fit/train
+    # We'll keep it in params if provided
+    
     out_cfg = cfg.get("outputs") or {}
     model_path = (
         paths.repo_root / str(out_cfg.get("model_path", "artifacts/catboost/model.cbm"))
@@ -203,18 +199,18 @@ def train_catboost(
     val_idx = val_df.index
     test_idx = test_df.index
 
-    X_train = X_all.loc[train_idx, feature_cols].to_numpy(dtype=float)
-    y_train = train_df[label_col].to_numpy(dtype=int)
+    X_train = X_all.loc[train_idx, feature_cols]
+    y_train = train_df[label_col].astype(int)
 
-    X_val = X_all.loc[val_idx, feature_cols].to_numpy(dtype=float)
-    y_val = val_df[label_col].to_numpy(dtype=int)
+    X_val = X_all.loc[val_idx, feature_cols]
+    y_val = val_df[label_col].astype(int)
 
-    X_test = X_all.loc[test_idx, feature_cols].to_numpy(dtype=float)
-    y_test = test_df[label_col].to_numpy(dtype=int)
+    X_test = X_all.loc[test_idx, feature_cols]
+    y_test = test_df[label_col].astype(int)
 
     print("DEBUG mean/std (first 5):")
-    print(np.round(X_train[:, :5].mean(axis=0), 3))
-    print(np.round(X_train[:, :5].std(axis=0), 3))
+    print(np.round(X_train.iloc[:, :5].mean(axis=0).values, 3))
+    print(np.round(X_train.iloc[:, :5].std(axis=0).values, 3))
 
     scale_pos_weight = None
     if use_scale_pos_weight:
@@ -223,18 +219,30 @@ def train_catboost(
         if n_pos == 0:
             raise ValueError("Train split has 0 positive samples. Cannot train.")
         scale_pos_weight = n_neg / n_pos
-        cb_params["scale_pos_weight"] = float(scale_pos_weight)
+        catboost_params["scale_pos_weight"] = float(scale_pos_weight)
 
-    train_pool = cb.Pool(X_train, label=y_train, feature_names=feature_cols)
-    val_pool = cb.Pool(X_val, label=y_val, feature_names=feature_cols)
-    test_pool = cb.Pool(X_test, label=y_test, feature_names=feature_cols)
+    # CHANGED: Use sample weights if available
+    w_train = None
+    if "sample_weight" in train_df.columns:
+        w_train = train_df["sample_weight"]
+        print("Using sample weights for training.")
 
-    model = cb.CatBoostClassifier(**cb_params)
-    model.fit(train_pool, eval_set=val_pool)
+    train_pool = cb.Pool(X_train, y_train, weight=w_train)
+    val_pool = cb.Pool(X_val, y_val)
+    test_pool = cb.Pool(X_test, y_test)
+
+    model = cb.CatBoostClassifier(**catboost_params)
+    
+    model.fit(
+        train_pool,
+        eval_set=val_pool,
+        early_stopping_rounds=early_stopping_rounds,
+        verbose=verbose_eval,
+        use_best_model=True
+    )
 
     model.save_model(str(model_path))
 
-    # CatBoost predict_proba returns (N, 2) array, we want column 1
     p_train = model.predict_proba(train_pool)[:, 1]
     p_val = model.predict_proba(val_pool)[:, 1]
     p_test = model.predict_proba(test_pool)[:, 1]
@@ -277,7 +285,7 @@ def train_catboost(
         rows.sort(key=lambda r: r["recall"])
         return rows[:top_k]
 
-    best_score = float(model.get_best_score()['validation']['AUC'])
+    best_score = model.get_best_score().get('validation', {}).get('AUC')
 
     # --- CALIBRATION (Moved INSIDE train_catboost) ---
     print("Calibrating CatBoost probabilities (internal step)...")
@@ -360,7 +368,6 @@ def train_catboost(
         "worst_per_capture_recall": {
             "test": worst_capture_recall_test,
         },
-        "evals_result": {}, # CatBoost doesn't return evals_result in the same way, skipping for now
     }
 
     metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
@@ -369,7 +376,8 @@ def train_catboost(
     preds["split"] = df[split_col].astype(str)
     preds["label"] = df[label_col].astype(int)
 
-    for c in ["flow_id", "capture_id"]:
+    # CHANGED: Added "dataset" to the list of columns to preserve
+    for c in ["flow_id", "capture_id", "dataset"]:
         if c in df.columns:
             preds[c] = df[c].astype(str)
 
