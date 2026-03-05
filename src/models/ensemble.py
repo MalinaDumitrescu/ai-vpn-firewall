@@ -10,7 +10,8 @@ import yaml
 import json
 from scipy.optimize import minimize
 from sklearn.metrics import roc_auc_score
-from sklearn.isotonic import IsotonicRegression
+from sklearn.linear_model import LogisticRegression
+isotonic import IsotonicRegression
 
 from src.eval.metrics import binary_metrics, select_policy_thresholds, _policy_key_from_fpr, threshold_at_fpr
 
@@ -318,7 +319,13 @@ def create_ensemble(
         "models": model_names,
         "weights": weight_dict,
         "thresholds_map": thresholds_map,
-        "firewall_policy_target_fpr": firewall_fpr,
+        "firewall_policy_target_fpr": firewall_fpr        "policy_thresholds": {k: {"threshold": v} for k, v in selected_thresholds.items()},
+        "firewall_policy": {
+            "chosen": firewall_policy_name,
+            "fpr_target": firewall_fpr,
+            "threshold": firewall_thr,
+            "mode": policy_mode,
+        },
         "splits": split_metrics
     }
 
