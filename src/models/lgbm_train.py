@@ -18,6 +18,14 @@ import json
 import numpy as np
 import pandas as pd
 import yaml
+from sklearn.linear_model import LogisticRegression
+
+from sklearn.metrics import (
+    roc_auc_score,
+    average_precision_score,
+    confusion_matrix,
+    precision_recall_fscore_support,
+)
 
 try:
     import lightgbm as lgb
@@ -314,7 +322,9 @@ def train_lightgbm(
     preds["p_raw"] = np.nan
     preds.loc[train_df.index, "p_raw"] = p_train_raw
     preds.loc[val_df.index, "p_raw"] = p_val_raw
-    preds.loc[test_df.index, "p_raw"] = p_test_raw
+    preds.loc[test_df.index, "p_raw"] = p_test_raw    preds.loc[train_df.index, "p_raw"] = p_train_calib
+    preds.loc[val_df.index, "p_raw"] = p_val_calib
+    preds.loc[test_df.index, "p_raw"] = p_test_calib
 
     preds.reset_index(drop=True).to_parquet(preds_path, index=False)
 
