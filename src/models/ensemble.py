@@ -10,9 +10,9 @@ import yaml
 import json
 from scipy.optimize import minimize
 from sklearn.metrics import roc_auc_score
-from sklearn.linear_model import LogisticRegression
+from sklearn.isotonic import IsotonicRegression
 
-from src.eval.metrics import binary_metrics, select_policy_thresholds, _policy_key_from_fpr
+from src.eval.metrics import binary_metrics, select_policy_thresholds, _policy_key_from_fpr, threshold_at_fpr
 
 
 @dataclass(frozen=True)
@@ -30,10 +30,25 @@ def _ensure_parent(p: Path) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
 
 
-def find_optimal_weights(df_val: pd.DataFrame, model_cols: List[str], label_col: str) -> np.ndarray:
-    """Find optimal weights for a weighted average ensemble."""
+def find_optimal_weights_firewall(
+    df_val: pd.DataFrame, 
+    model_cols: List[str], 
+    label_col: str,
+    target_fpr: float = 0.001
+) -> np.ndarray:
+    """
+    Find optimal weights for a weighted average ensemble maximizing RECALL at target FPR.
+    """
     y_true = df_val[label_col].to_numpy()
     preds = df_val[model_cols].to_numpy()
+
+    # Pre-compute negatives mask for speed
+    neg_mask = (y_true == 0)
+    pos_mask = (y_true == 1)
+    
+    # If no positives or negatives, fallback to equal weights
+    if not np.any(neg_mask) or not np.any(pos_mask):
+        return np.ones(len(model_cols)) / len(model_cols)
 
     def objective(weights):
         # Ensure non-negative and sum to 1
@@ -42,22 +57,50 @@ def find_optimal_weights(df_val: pd.DataFrame, model_cols: List[str], label_col:
             w = np.ones_like(w)
         w /= w.sum()
         
-        weighted_preds = np.dot(preds, w)
-        return -roc_auc_score(y_true, weighted_preds)
+        # 1. Compute ensemble score
+        p = np.dot(preds, w)
+        
+        # 2. Calibrate on validation (Isotonic) - simplified for optimization loop
+        # Full isotonic is slow inside optimization loop.
+        # Approximation: Just use rank-based thresholding on raw ensemble score.
+        # Since Isotonic is monotonic, maximizing recall on raw score at fixed FPR 
+        # is equivalent to maximizing recall on calibrated score at fixed FPR.
+        
+        # 3. Choose threshold t that achieves FPR <= target_fpr on validation NEGATIVES
+        neg_scores = p[neg_mask]
+        
+        # Threshold is the (1-target_fpr) quantile of negative scores
+        # We want p > t to be positive.
+        t = np.quantile(neg_scores, 1.0 - target_fpr)
+        
+        # 4. Compute recall/TPR at that threshold
+        pos_scores = p[pos_mask]
+        
+        tp = np.sum(pos_scores >= t)
+        recall = tp / len(pos_scores)
+        
+        # Optional: Add a secondary term for monitor threshold (0.01) to avoid pathological solutions
+        # t_monitor = np.quantile(neg_scores, 1.0 - 0.01)
+        # tp_monitor = np.sum(pos_scores >= t_monitor)
+        # recall_monitor = tp_monitor / len(pos_scores)
+        
+        # objective = -recall - 0.1 * recall_monitor
+        return -recall
 
     # Initial guess: equal weights
     initial_weights = np.ones(len(model_cols)) / len(model_cols)
     
     # Constraint: weights must sum to 1
-    constraints = ({'type': 'eq', 'fun': lambda w: 1 - sum(w)})
+    constraints = ({'type': 'eq', 'fun': lambda w: 1 - np.sum(w)})
     
     # Bounds: weights must be between 0 and 1
     bounds = [(0, 1)] * len(model_cols)
 
+    # Use SLSQP
     result = minimize(objective, initial_weights, method='SLSQP', bounds=bounds, constraints=constraints)
     
     optimal_weights = np.abs(result.x)
-    return optimal_weights / optimal_weights.sum() # Re-normalize for safety
+    return optimal_weights / optimal_weights.sum()
 
 
 def create_ensemble(
@@ -79,8 +122,7 @@ def create_ensemble(
     policy_fprs = training_cfg.get("policy_fprs", [0.001, 0.01, 0.05])
     policy_fprs = [float(x) for x in policy_fprs]
     firewall_fpr = float(training_cfg.get("firewall_policy", 0.001))
-    policy_mode = str(training_cfg.get("policy_mode", "max_recall_under_fpr"))
-
+    
     # The YAML should list model names (e.g. ["xgb", "lgbm", "catboost"])
     model_names = cfg.get("models", [])
     if not model_names:
@@ -98,18 +140,10 @@ def create_ensemble(
     _ensure_parent(metrics_path)
 
     # Load predictions from individual models
-    # We expect each model to have saved a preds.parquet with "p_raw" (calibrated prob)
-    # or we can use the model-specific column if we know it.
-    # Let's assume standard "p_raw" is the calibrated output from train_*.py
-    
     dfs = []
     for m in model_names:
-        # Construct path: artifacts/{model_name}/preds.parquet
-        # This assumes a standard directory structure
         p = paths.artifacts_dir / m / "preds.parquet"
         if not p.exists():
-            # Fallback for "xgboost" vs "xgb" naming if needed, or raise error
-            # Try "xgb" if "xgboost" was passed
             if m == "xgboost": p = paths.artifacts_dir / "xgb" / "preds.parquet"
             elif m == "lightgbm": p = paths.artifacts_dir / "lgbm" / "preds.parquet"
             
@@ -117,15 +151,12 @@ def create_ensemble(
                 raise FileNotFoundError(f"Prediction file not found for model '{m}': {p}")
         
         d = pd.read_parquet(p)
-        # We need flow_id to merge
         if "flow_id" not in d.columns:
             raise ValueError(f"Model {m} preds missing flow_id")
         
-        # Rename p_raw to p_{model}
-        # If p_raw doesn't exist, try p_{model} or p_xgb etc.
+        # Use p_raw (calibrated from model training) or specific column
         col_name = "p_raw"
         if col_name not in d.columns:
-            # Try specific names
             if f"p_{m}" in d.columns: col_name = f"p_{m}"
             elif "p_xgb" in d.columns: col_name = "p_xgb"
             elif "p_lgbm" in d.columns: col_name = "p_lgbm"
@@ -133,7 +164,6 @@ def create_ensemble(
             else:
                 raise ValueError(f"Could not find probability column in {p}")
         
-        # Keep only ID and prob
         subset = d[["flow_id", col_name]].rename(columns={col_name: f"p_{m}"})
         dfs.append(subset)
 
@@ -142,93 +172,153 @@ def create_ensemble(
     for i in range(1, len(dfs)):
         df_ens = pd.merge(df_ens, dfs[i], on="flow_id", how="inner")
 
-    # Merge back metadata (label, split, capture_id) from the first model's full file
-    # (Assuming all models were trained on same splits/flows)
+    # Merge back metadata
     base_df = pd.read_parquet(paths.artifacts_dir / model_names[0] / "preds.parquet")
-    # Check if base_df has the metadata
-    # CHANGED: Added "dataset" to meta_cols to preserve it for evaluation
     meta_cols = ["flow_id", label_col, split_col, "capture_id", "dataset"]
-    # Filter to available columns
     meta_cols = [c for c in meta_cols if c in base_df.columns]
     
     df_ens = pd.merge(df_ens, base_df[meta_cols], on="flow_id", how="left")
 
-    # 1. Find Optimal Weights on VAL
+    # Ensure dataset column exists
+    if "dataset" not in df_ens.columns:
+        # Try to infer or fail? For now, if missing, fill with "unknown"
+        print("WARNING: 'dataset' column missing in ensemble inputs. Filling with 'unknown'.")
+        df_ens["dataset"] = "unknown"
+
+    # 1. Find Optimal Weights on VAL (Firewall Objective)
     val_mask = df_ens[split_col] == val_name
     if not val_mask.any():
         raise ValueError(f"No validation samples found for split '{val_name}'")
     
-    df_val = df_ens[val_mask].copy()
+    df_val_for_weights = df_ens[val_mask].copy()
     pred_cols = [f"p_{m}" for m in model_names]
     
-    weights = find_optimal_weights(df_val, pred_cols, label_col)
+    print(f"Optimizing ensemble weights for Firewall Recall at FPR={firewall_fpr}...")
+    weights = find_optimal_weights_firewall(df_val_for_weights, pred_cols, label_col, target_fpr=firewall_fpr)
     weight_dict = dict(zip(model_names, weights.tolist()))
     print("Ensemble Weights:", weight_dict)
 
     # 2. Compute Weighted Average (Ensemble Score)
-    # p_ensemble = w1*p1 + w2*p2 ...
-    # We do this via dot product
     probs_matrix = df_ens[pred_cols].to_numpy()
     df_ens["p_ensemble"] = np.dot(probs_matrix, weights)
 
-    # 3. Calibrate the Ensemble Score
-    # We fit a calibrator on the ensemble score using VAL set
-    print("Calibrating Ensemble...")
-    calib_X = df_ens.loc[val_mask, "p_ensemble"].values.reshape(-1, 1)
-    calib_y = df_ens.loc[val_mask, label_col].values
+    # 3. Calibrate the Ensemble Score (Isotonic per Dataset)
+    print("Calibrating Ensemble (Isotonic per dataset)...")
     
-    calibrator = LogisticRegression(solver="lbfgs")
-    calibrator.fit(calib_X, calib_y)
+    # We need to fit calibrators on VAL set
+    val_df_for_calib = df_ens[val_mask]
     
-    # Apply to all
-    all_X = df_ens["p_ensemble"].values.reshape(-1, 1)
-    df_ens["p_calib"] = calibrator.predict_proba(all_X)[:, 1]
+    calibrators = {}
+    datasets = df_ens["dataset"].unique()
     
-    # 4. Select Thresholds on Calibrated Ensemble Score (VAL)
-    val_df_calib = pd.DataFrame({
-        split_col: [val_name] * len(calib_y),
-        label_col: calib_y,
-        "p": df_ens.loc[val_mask, "p_calib"].values
-    })
+    # Global calibrator (fallback)
+    global_iso = IsotonicRegression(out_of_bounds="clip")
+    global_iso.fit(val_df_for_calib["p_ensemble"], val_df_for_calib[label_col])
+    calibrators["global"] = global_iso
     
-    all_fprs = sorted(list(set(policy_fprs + [firewall_fpr])))
-    selected_thresholds = select_policy_thresholds(
-        val_df_calib,
-        label_col=label_col,
-        prob_col="p",
-        split_col=split_col,
-        split_name=val_name,
-        policy_fprs=tuple(all_fprs),
-        policy_mode=policy_mode
-    )
+    # Per-dataset calibrators
+    for ds in datasets:
+        ds_val = val_df_for_calib[val_df_for_calib["dataset"] == ds]
+        if len(ds_val) > 50: # Only fit if enough samples
+            iso = IsotonicRegression(out_of_bounds="clip")
+            iso.fit(ds_val["p_ensemble"], ds_val[label_col])
+            calibrators[ds] = iso
+        else:
+            print(f"Warning: Not enough validation samples for dataset '{ds}' to fit calibrator. Using global.")
+            calibrators[ds] = global_iso
+
+    # Apply calibration
+    df_ens["p_calib"] = 0.0
     
-    firewall_policy_name = _policy_key_from_fpr(firewall_fpr)
-    firewall_thr = selected_thresholds[firewall_policy_name]
+    # Apply global first as default
+    df_ens["p_calib"] = calibrators["global"].transform(df_ens["p_ensemble"])
+    
+    # Then apply specific calibrators where applicable
+    for ds in datasets:
+        if ds in calibrators and ds != "global":
+            mask = df_ens["dataset"] == ds
+            if mask.any():
+                df_ens.loc[mask, "p_calib"] = calibrators[ds].transform(df_ens.loc[mask, "p_ensemble"])
+
+    # 4. Select Thresholds per Dataset (on VAL)
+    # Get a fresh slice of the validation data which now includes 'p_calib'
+    val_df_calibrated = df_ens[val_mask]
+
+    thresholds_map = {}
+    
+    # Helper to compute thresholds for a subset
+    def compute_subset_thresholds(subset_df):
+        y = subset_df[label_col].to_numpy()
+        p = subset_df["p_calib"].to_numpy()
+        
+        # Compute for all policy FPRs + firewall FPR
+        all_fprs = sorted(list(set(policy_fprs + [firewall_fpr])))
+        
+        thrs = {}
+        for fpr in all_fprs:
+            t = threshold_at_fpr(y, p, fpr)
+            thrs[_policy_key_from_fpr(fpr)] = t
+        return thrs
+
+    # Global thresholds
+    thresholds_map["global"] = compute_subset_thresholds(val_df_calibrated)
+    
+    # Per-dataset thresholds
+    for ds in datasets:
+        ds_val = val_df_calibrated[val_df_calibrated["dataset"] == ds]
+        if len(ds_val) > 0:
+            thresholds_map[ds] = compute_subset_thresholds(ds_val)
 
     # 5. Compute Metrics for All Splits
+    # We report metrics using the PER-DATASET thresholds if available, else global
     split_metrics = {}
+    
     for sp in df_ens[split_col].unique():
-        mask = df_ens[split_col] == sp
-        y_sp = df_ens.loc[mask, label_col].to_numpy()
-        p_sp = df_ens.loc[mask, "p_calib"].to_numpy()
+        sp_df = df_ens[df_ens[split_col] == sp]
         
-        split_metrics[str(sp)] = binary_metrics(
+        # We want to report metrics broken down by dataset as well
+        sp_metrics = {}
+        
+        # Overall metrics for this split (using global thresholds)
+        y_sp = sp_df[label_col].to_numpy()
+        p_sp = sp_df["p_calib"].to_numpy()
+        
+        # Use firewall threshold from global set for the main "firewall_policy" entry
+        global_firewall_thr = thresholds_map["global"][_policy_key_from_fpr(firewall_fpr)]
+        
+        sp_metrics["overall"] = binary_metrics(
             y_sp, 
             p_sp, 
-            threshold=firewall_thr, # Use firewall threshold for main metrics
-            fixed_policy_thresholds=selected_thresholds
+            threshold=global_firewall_thr,
+            fixed_policy_thresholds=thresholds_map["global"]
         )
+        
+        # Per-dataset metrics
+        for ds in sp_df["dataset"].unique():
+            ds_df = sp_df[sp_df["dataset"] == ds]
+            if len(ds_df) == 0: continue
+            
+            y_ds = ds_df[label_col].to_numpy()
+            p_ds = ds_df["p_calib"].to_numpy()
+            
+            # Use per-dataset thresholds if available, else global
+            thrs = thresholds_map.get(ds, thresholds_map["global"])
+            ds_firewall_thr = thrs[_policy_key_from_fpr(firewall_fpr)]
+            
+            sp_metrics[ds] = binary_metrics(
+                y_ds,
+                p_ds,
+                threshold=ds_firewall_thr,
+                fixed_policy_thresholds=thrs
+            )
+            
+        split_metrics[str(sp)] = sp_metrics
 
     metrics = {
         "models": model_names,
         "weights": weight_dict,
-        "policy_thresholds": {k: {"threshold": v} for k, v in selected_thresholds.items()},
-        "firewall_policy": {
-            "chosen": firewall_policy_name,
-            "fpr_target": firewall_fpr,
-            "threshold": firewall_thr,
-            "mode": policy_mode,
-        },
+        "thresholds_map": thresholds_map,
+        "firewall_policy_target_fpr": firewall_fpr,
         "splits": split_metrics
     }
 

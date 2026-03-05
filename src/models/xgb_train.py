@@ -18,14 +18,6 @@ import json
 import numpy as np
 import pandas as pd
 import yaml
-from sklearn.linear_model import LogisticRegression
-
-from sklearn.metrics import (
-    roc_auc_score,
-    average_precision_score,
-    confusion_matrix,
-    precision_recall_fscore_support,
-)
 
 try:
     import xgboost as xgb
@@ -139,7 +131,6 @@ def train_xgboost(
     num_boost_round = int(training_cfg.get("num_boost_round", 4000))
     verbose_eval = int(training_cfg.get("verbose_eval", 100))
 
-    # NEW (configurable): policy FPR targets + which one is the "firewall policy"
     policy_fprs = training_cfg.get("policy_fprs", [0.001, 0.01, 0.05])
     policy_fprs = [float(x) for x in policy_fprs]
     firewall_fpr = float(training_cfg.get("firewall_policy", 0.001))
@@ -180,7 +171,6 @@ def train_xgboost(
     pipeline = FeaturePipeline.load(feature_art)
     X_all = pipeline.transform(df)
 
-    # IMPORTANT: use the pipeline’s model feature order (matches eval)
     feature_cols = pipeline.model_feature_names()
     bad = {"label", "split", "flow_id", "capture_id", "file_names", "connection_str", "app"}
     leaks = sorted(set(feature_cols) & bad)
@@ -209,10 +199,6 @@ def train_xgboost(
     X_test = X_all.loc[test_idx, feature_cols].to_numpy(dtype=float)
     y_test = test_df[label_col].to_numpy(dtype=int)
 
-    print("DEBUG mean/std (first 5):")
-    print(np.round(X_train[:, :5].mean(axis=0), 3))
-    print(np.round(X_train[:, :5].std(axis=0), 3))
-
     scale_pos_weight = None
     if use_scale_pos_weight:
         n_pos = int((y_train == 1).sum())
@@ -222,7 +208,6 @@ def train_xgboost(
         scale_pos_weight = n_neg / n_pos
         xgb_params["scale_pos_weight"] = float(scale_pos_weight)
 
-    # CHANGED: Use sample weights if available
     w_train = None
     if "sample_weight" in train_df.columns:
         w_train = train_df["sample_weight"].to_numpy(dtype=float)
@@ -250,78 +235,23 @@ def train_xgboost(
     p_val = booster.predict(dval, iteration_range=it_range)
     p_test = booster.predict(dtest, iteration_range=it_range)
 
-    # ---- Step 6 helper: worst per-capture recall (VNAT only for now)
-    def _worst_per_capture_recall(
-        df_split: pd.DataFrame,
-        probs: np.ndarray,
-        *,
-        thr: float,
-        label_col: str,
-        capture_col: str = "capture_id",
-        top_k: int = 10,
-    ) -> list[dict[str, Any]]:
-        if capture_col not in df_split.columns:
-            return []
-
-        tmp = df_split[[capture_col, label_col]].copy()
-        tmp["p"] = np.asarray(probs, dtype=float)
-        tmp["yhat"] = (tmp["p"] >= float(thr)).astype(int)
-
-        rows: list[dict[str, Any]] = []
-        for cid, g in tmp.groupby(capture_col):
-            pos = g[g[label_col] == 1]
-            if len(pos) == 0:
-                continue
-            tp = int((pos["yhat"] == 1).sum())
-            fn = int((pos["yhat"] == 0).sum())
-            rec = tp / (tp + fn + 1e-9)
-            rows.append(
-                {
-                    "capture_id": str(cid),
-                    "recall": float(rec),
-                    "pos_flows": int(len(pos)),
-                    "tp": tp,
-                    "fn": fn,
-                }
-            )
-
-        rows.sort(key=lambda r: r["recall"])
-        return rows[:top_k]
-
     best_score_raw = booster.best_score
     try:
         best_score = float(best_score_raw) if best_score_raw is not None else None
     except (TypeError, ValueError):
         best_score = None
 
-    # --- CALIBRATION (Moved INSIDE train_xgboost) ---
-    # We must calibrate BEFORE selecting thresholds to ensure the thresholds match the deployed scores.
-    print("Calibrating XGBoost probabilities (internal step)...")
-    
-    # Fit calibrator on validation set
-    calib_X = p_val.reshape(-1, 1)
-    calib_y = y_val
-    
-    calibrator = LogisticRegression(solver="lbfgs")
-    calibrator.fit(calib_X, calib_y)
-    
-    # Apply to all splits
-    p_train_calib = calibrator.predict_proba(p_train.reshape(-1, 1))[:, 1]
-    p_val_calib = calibrator.predict_proba(p_val.reshape(-1, 1))[:, 1]
-    p_test_calib = calibrator.predict_proba(p_test.reshape(-1, 1))[:, 1]
+    # NO LONGER CALIBRATING PER-MODEL. Saving raw scores for ensemble calibration.
+    p_train_raw = p_train
+    p_val_raw = p_val
+    p_test_raw = p_test
 
-    # ---- Step 5: firewall-style policy threshold selection (on VAL)
-    # Use the shared implementation now
-    
-    # 1. Create a temporary dataframe for threshold selection using CALIBRATED probs
     val_df_for_sel = pd.DataFrame({
         split_col: [val_name] * len(y_val),
         label_col: y_val,
-        "p": p_val_calib
+        "p": p_val_raw
     })
     
-    # 2. Select thresholds using ONLY the validation split
-    # Ensure firewall_fpr is in the list of FPRs to compute
     all_fprs = sorted(list(set(policy_fprs + [firewall_fpr])))
     
     selected_thresholds = select_policy_thresholds(
@@ -336,26 +266,16 @@ def train_xgboost(
 
     firewall_policy_name = _policy_key_from_fpr(firewall_fpr)
     firewall_thr = selected_thresholds[firewall_policy_name]
-
-    # 3. Compute metrics for all splits using these FIXED thresholds
-    # We'll use binary_metrics directly for each split to ensure consistency
     
     def pack_split_with_fixed_thresholds(y: np.ndarray, p: np.ndarray) -> Dict[str, Any]:
+        # Note: we are evaluating raw scores here, not calibrated ones.
+        # This is for per-model analysis only. The final ensemble will be calibrated.
         return binary_metrics(
             y, 
             p, 
-            threshold=0.5, 
+            threshold=firewall_thr,
             fixed_policy_thresholds=selected_thresholds
         )
-
-    worst_capture_recall_test = _worst_per_capture_recall(
-        test_df,
-        p_test_calib,
-        thr=firewall_thr,
-        label_col=label_col,
-        capture_col="capture_id",
-        top_k=10,
-    )
 
     metrics: Dict[str, Any] = {
         "dataset": dataset,
@@ -370,19 +290,16 @@ def train_xgboost(
         .sha256(",".join(feature_cols).encode("utf-8"))
         .hexdigest(),
         "splits": {
-            "train": pack_split_with_fixed_thresholds(y_train, p_train_calib),
-            "val": pack_split_with_fixed_thresholds(y_val, p_val_calib),
-            "test": pack_split_with_fixed_thresholds(y_test, p_test_calib),
+            "train": pack_split_with_fixed_thresholds(y_train, p_train_raw),
+            "val": pack_split_with_fixed_thresholds(y_val, p_val_raw),
+            "test": pack_split_with_fixed_thresholds(y_test, p_test_raw),
         },
-        "policy_thresholds": {k: {"threshold": v} for k, v in selected_thresholds.items()}, # Simplified for summary
+        "policy_thresholds": {k: {"threshold": v} for k, v in selected_thresholds.items()},
         "firewall_policy": {
             "chosen": firewall_policy_name,
             "fpr_target": firewall_fpr,
             "threshold": firewall_thr,
             "mode": policy_mode,
-        },
-        "worst_per_capture_recall": {
-            "test": worst_capture_recall_test,
         },
         "evals_result": evals_result,
     }
@@ -393,20 +310,15 @@ def train_xgboost(
     preds["split"] = df[split_col].astype(str)
     preds["label"] = df[label_col].astype(int)
 
-    # CHANGED: Added "dataset" to the list of columns to preserve
     for c in ["flow_id", "capture_id", "dataset"]:
         if c in df.columns:
-            preds[c] = df[c].astype(str)
+            preds[c] = df[c]
 
-    preds.loc[train_df.index, "p_xgb"] = p_train
-    preds.loc[val_df.index, "p_xgb"] = p_val
-    preds.loc[test_df.index, "p_xgb"] = p_test
-    
-    # Standardize on p_raw (which is now the calibrated probability for downstream consistency)
+    # Save raw probabilities for ensembling
     preds["p_raw"] = np.nan
-    preds.loc[train_df.index, "p_raw"] = p_train_calib
-    preds.loc[val_df.index, "p_raw"] = p_val_calib
-    preds.loc[test_df.index, "p_raw"] = p_test_calib
+    preds.loc[train_df.index, "p_raw"] = p_train_raw
+    preds.loc[val_df.index, "p_raw"] = p_val_raw
+    preds.loc[test_df.index, "p_raw"] = p_test_raw
 
     preds.reset_index(drop=True).to_parquet(preds_path, index=False)
 
