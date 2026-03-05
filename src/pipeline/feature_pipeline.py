@@ -27,7 +27,7 @@ DATASET_COL = "dataset"
 FORBIDDEN_COLS = {"app", "file_names", "connection_str"}
 
 # Columns to explicitly exclude from model features (e.g. quality flags that are constant or not behavioral)
-EXCLUDE_FROM_MODEL = {"q_min_packets_ok"}
+EXCLUDE_FROM_MODEL = {"q_min_packets_ok", "sample_weight"}
 
 
 def _ensure_numeric_finite(df: pd.DataFrame) -> pd.DataFrame:
@@ -50,6 +50,7 @@ class FeaturePipeline:
     Fit on VNAT TRAIN only, apply everywhere.
 
     - Enforces the same feature schema everywhere (fills missing with 0.0)
+    - Applies robust numeric transform (clip + log1p) to heavy-tailed features
     - Scales continuous numeric features with StandardScaler (linear/affine scaling)
     - Leaves quality indicators (q_*) unscaled
 
@@ -61,6 +62,7 @@ class FeaturePipeline:
     scale_cols: Optional[List[str]] = None
     passthrough_cols: Optional[List[str]] = None
     scaler: Optional[StandardScaler] = None
+    clip_q: Optional[Dict[str, float]] = None
     metadata: Optional[Dict[str, Any]] = None
 
     def fit(self, df_features: pd.DataFrame, fit_provenance: Optional[Dict[str, Any]] = None) -> "FeaturePipeline":
@@ -96,6 +98,27 @@ class FeaturePipeline:
             raise ValueError("No continuous columns to scale. Check feature extraction / feature naming.")
         # It's OK if passthrough is empty.
 
+        # --- Robust Numeric Transform (Fit) ---
+        # Identify heavy-tailed features
+        heavy_tailed_cols = []
+        for c in scale:
+            if "iat" in c or c.startswith("sz_") or c.startswith("h_"):
+                heavy_tailed_cols.append(c)
+        
+        clip_q = {}
+        for c in heavy_tailed_cols:
+            # Compute 99.5th percentile on TRAIN
+            q995 = float(X_processed[c].quantile(0.995))
+            clip_q[c] = q995
+            
+            # Apply transform in-place for scaler fitting
+            # 1. Clip lower to 0
+            X_processed[c] = X_processed[c].clip(lower=0.0)
+            # 2. Clip upper to q995
+            X_processed[c] = X_processed[c].clip(upper=q995)
+            # 3. Log1p
+            X_processed[c] = np.log1p(X_processed[c])
+
         scaler = StandardScaler(with_mean=True, with_std=True)
         scaler.fit(X_processed[scale].to_numpy(dtype=float)) # Use X_processed here
 
@@ -103,6 +126,7 @@ class FeaturePipeline:
         self.scale_cols = scale
         self.passthrough_cols = passthrough
         self.scaler = scaler
+        self.clip_q = clip_q
         self.metadata = fit_provenance or {}
         return self
 
@@ -172,6 +196,17 @@ class FeaturePipeline:
         X = X[self.feature_cols].copy()
         X = _ensure_numeric_finite(X)
 
+        # --- Robust Numeric Transform (Apply) ---
+        if self.clip_q:
+            for c, q995 in self.clip_q.items():
+                if c in X.columns:
+                    # 1. Clip lower to 0
+                    X[c] = X[c].clip(lower=0.0)
+                    # 2. Clip upper to q995
+                    X[c] = X[c].clip(upper=q995)
+                    # 3. Log1p
+                    X[c] = np.log1p(X[c])
+
         # Scale continuous
         scaled_arr = self.scaler.transform(X[self.scale_cols].to_numpy(dtype=float))
         Xs = pd.DataFrame(scaled_arr, columns=self.scale_cols, index=df_features.index)
@@ -202,6 +237,7 @@ class FeaturePipeline:
             "id_cols": ID_COLS,
             "label_col": LABEL_COL,
             "metadata": self.metadata,
+            "clip_q": self.clip_q, # Save clip values
         }
         save_json(art.feature_columns_json, meta)
         save_pickle(art.scaler_pkl, self.scaler)
@@ -220,6 +256,7 @@ class FeaturePipeline:
                 passthrough_cols=[],
                 scaler=scaler,
                 metadata={},
+                clip_q={},
             )
 
         # New format: dict with explicit scale/passthrough
@@ -227,6 +264,7 @@ class FeaturePipeline:
         scale_cols = meta["scale_cols"]
         passthrough_cols = meta.get("passthrough_cols", [])
         metadata = meta.get("metadata", {})
+        clip_q = meta.get("clip_q", {})
 
         # Safety: ensure no overlap and preserve order as stored
         overlap = set(scale_cols).intersection(passthrough_cols)
@@ -239,4 +277,5 @@ class FeaturePipeline:
             passthrough_cols=passthrough_cols,
             scaler=scaler,
             metadata=metadata,
+            clip_q=clip_q,
         )

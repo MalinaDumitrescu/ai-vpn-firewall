@@ -201,18 +201,9 @@ def extract_features_from_flows(
 
         # Ratios (avoid div by 0)
         eps = cfg.eps
-        # CHANGED: Direction-invariant ratios
-        # Instead of up/total, we use min(up, down) / max(up, down) to capture imbalance without direction
-        # And max(up, down) / total to capture dominance
         
-        # Avoid division by zero
-        max_pkts = max(up_pkts, down_pkts)
-        min_pkts = min(up_pkts, down_pkts)
-        pkt_imbalance = min_pkts / max(max_pkts, 1)
-
-        max_bytes = max(up_bytes, down_bytes)
-        min_bytes = min(up_bytes, down_bytes)
-        byte_imbalance = min_bytes / max(max_bytes, eps)
+        # REMOVED: f_pkt_imbalance and f_byte_imbalance as requested
+        # REMOVED: f_iat_burstiness as requested
 
         # Histograms
         h_size_all = fixed_hist(sz, size_spec)
@@ -232,12 +223,11 @@ def extract_features_from_flows(
             "flow_id": str(r.flow_id),
             "capture_id": str(r.capture_id),
             "label": int(r.label),
-
-            # CHANGED: Replaced directional ratios with invariant ones
-            "f_pkt_imbalance": float(pkt_imbalance),
-            "f_byte_imbalance": float(byte_imbalance),
-
-            "f_iat_burstiness": _burstiness(iat_all),
+            
+            # REMOVED: Imbalance features
+            # "f_pkt_imbalance": float(pkt_imbalance),
+            # "f_byte_imbalance": float(byte_imbalance),
+            # "f_iat_burstiness": _burstiness(iat_all),
         }
 
         # Flatten stats with prefixes

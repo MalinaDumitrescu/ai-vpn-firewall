@@ -90,14 +90,26 @@ def print_metrics_summary(metrics: Dict[str, Any]) -> None:
             print(f"  ROC AUC: {m.get('roc_auc', 'N/A')}")
             print(f"  PR AUC:  {m.get('pr_auc', 'N/A')}")
             
-            thr_metrics = m.get(f"threshold_{threshold}", {})
+            # CHANGED: Use "firewall_policy" key instead of "threshold_0.5"
+            thr_metrics = m.get("firewall_policy", {})
             if thr_metrics:
-                print(f"  At Threshold {threshold}:")
+                actual_thr = thr_metrics.get('threshold', threshold)
+                print(f"  At Firewall Threshold {actual_thr:.4f}:")
                 print(f"    Precision: {thr_metrics.get('precision', 'N/A')}")
                 print(f"    Recall:    {thr_metrics.get('recall', 'N/A')}")
                 print(f"    F1 Score:  {thr_metrics.get('f1', 'N/A')}")
                 cm = thr_metrics.get('confusion_matrix', {})
                 print(f"    Confusion Matrix: TN={cm.get('tn')}, FP={cm.get('fp')}, FN={cm.get('fn')}, TP={cm.get('tp')}")
+
+            # Optional: Print monitor threshold (e.g. fpr_0.01)
+            pol_metrics = m.get("policy_thresholds", {})
+            if "fpr_1pct" in pol_metrics:
+                mon = pol_metrics["fpr_1pct"]
+                print(f"  At Monitor Threshold (FPR ~1%) {mon.get('threshold', 'N/A'):.4f}:")
+                print(f"    Recall: {mon.get('recall', 'N/A')}")
+                cm = mon.get('confusion_matrix', {})
+                print(f"    Confusion Matrix: TN={cm.get('tn')}, FP={cm.get('fp')}, FN={cm.get('fn')}, TP={cm.get('tp')}")
+
 
     if "calibrated" in metrics:
         print("\n--- Calibrated Probabilities ---")

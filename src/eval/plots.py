@@ -92,6 +92,7 @@ def plot_confusion_matrices(
     prob_col: str = "p_raw",
     split_col: str = "split",
     threshold: float = 0.5,
+    title: Optional[str] = None,
     save_dir: Optional[Path] = None,
 ) -> None:
     splits = sorted(df_preds[split_col].unique())
@@ -110,7 +111,11 @@ def plot_confusion_matrices(
         sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=False)
         plt.xlabel('Predicted Label')
         plt.ylabel('True Label')
-        plt.title(f'Confusion Matrix - {split} (Thr={threshold})')
+        
+        if title:
+            plt.title(f'{title} - {split}')
+        else:
+            plt.title(f'Confusion Matrix - {split} (Thr={threshold:.4f})')
         
         if save_dir:
             save_dir.mkdir(parents=True, exist_ok=True)

@@ -24,14 +24,14 @@ xgb_params:
   objective: "binary:logistic"
   eval_metric: ["logloss", "auc", "aucpr"]
   tree_method: "hist"
-  max_depth: 4
-  learning_rate: 0.05
-  subsample: 0.8
-  colsample_bytree: 0.8
-  min_child_weight: 5
-  reg_lambda: 2.0
-  reg_alpha: 0.0
-  gamma: 0.0
+  max_depth: 3  # Reduced from 4
+  learning_rate: 0.03 # Reduced from 0.05
+  subsample: 0.7 # Reduced from 0.8
+  colsample_bytree: 0.7 # Reduced from 0.8
+  min_child_weight: 10 # Increased from 5
+  reg_lambda: 5.0 # Increased from 2.0
+  reg_alpha: 1.0 # Increased from 0.0
+  gamma: 1.0 # Increased from 0.0
 
 outputs:
   model_path: "artifacts/xgb/model.json"

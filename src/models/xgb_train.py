@@ -222,7 +222,13 @@ def train_xgboost(
         scale_pos_weight = n_neg / n_pos
         xgb_params["scale_pos_weight"] = float(scale_pos_weight)
 
-    dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=feature_cols)
+    # CHANGED: Use sample weights if available
+    w_train = None
+    if "sample_weight" in train_df.columns:
+        w_train = train_df["sample_weight"].to_numpy(dtype=float)
+        print("Using sample weights for training.")
+
+    dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=feature_cols, weight=w_train)
     dval = xgb.DMatrix(X_val, label=y_val, feature_names=feature_cols)
     dtest = xgb.DMatrix(X_test, label=y_test, feature_names=feature_cols)
 
@@ -387,7 +393,8 @@ def train_xgboost(
     preds["split"] = df[split_col].astype(str)
     preds["label"] = df[label_col].astype(int)
 
-    for c in ["flow_id", "capture_id"]:
+    # CHANGED: Added "dataset" to the list of columns to preserve
+    for c in ["flow_id", "capture_id", "dataset"]:
         if c in df.columns:
             preds[c] = df[c].astype(str)
 
