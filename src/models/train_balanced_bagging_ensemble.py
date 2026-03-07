@@ -14,8 +14,9 @@ Method:
 - Average probabilities within each family.
 - Combine family probabilities with configurable weights.
 - Fit isotonic calibration on VAL.
-- Tune thresholds on calibrated VAL for target FPRs.
-- Evaluate on TEST (overall + per dataset).
+- Fit logistic calibration (Platt scaling) on VAL.
+- Tune thresholds on calibrated VAL for target FPRs for each calibration mode.
+- Evaluate on TEST (overall + per dataset) for each calibration mode.
 
 This file is intentionally strict:
 - no fallback GroupShuffleSplit
@@ -33,6 +34,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.isotonic import IsotonicRegression
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     roc_auc_score,
     average_precision_score,
@@ -581,40 +583,84 @@ def run_balanced_bagging(
     val_probs_raw = combine_family_probs(val_family_probs)
     test_probs_raw = combine_family_probs(test_family_probs)
 
-    logger.info("Fitting isotonic calibrator on validation set...")
+    # --- Calibration ---
+    logger.info("Fitting calibrators on validation set...")
+
+    # 1. Isotonic
     isotonic = IsotonicRegression(out_of_bounds="clip")
     isotonic.fit(val_probs_raw, y_val.values)
 
-    train_probs = isotonic.transform(train_probs_raw)
-    val_probs = isotonic.transform(val_probs_raw)
-    test_probs = isotonic.transform(test_probs_raw)
+    # 2. Platt (Logistic)
+    # Reshape for sklearn
+    X_val_calib = val_probs_raw.reshape(-1, 1)
+    platt = LogisticRegression(random_state=seed, solver='lbfgs')
+    platt.fit(X_val_calib, y_val.values)
 
+    # Transform all splits
+    train_probs_iso = isotonic.transform(train_probs_raw)
+    val_probs_iso = isotonic.transform(val_probs_raw)
+    test_probs_iso = isotonic.transform(test_probs_raw)
+
+    train_probs_platt = platt.predict_proba(train_probs_raw.reshape(-1, 1))[:, 1]
+    val_probs_platt = platt.predict_proba(val_probs_raw.reshape(-1, 1))[:, 1]
+    test_probs_platt = platt.predict_proba(test_probs_raw.reshape(-1, 1))[:, 1]
+
+    # --- Threshold Tuning ---
     logger.info("Tuning thresholds on calibrated validation set...")
     target_fprs_list = [float(x) for x in target_fprs.split(",")]
-    thresholds = {"default": 0.5}
 
-    for fpr in target_fprs_list:
-        thr = threshold_at_fpr(y_val.values, val_probs, fpr)
-        thresholds[f"fpr_{fpr}"] = float(thr)
-        logger.info(f"  FPR {fpr}: calibrated threshold = {thr:.4f}")
+    def tune_thresholds(y_true, y_prob, mode_name):
+        thrs = {"default": 0.5}
+        for fpr in target_fprs_list:
+            thr = threshold_at_fpr(y_true, y_prob, fpr)
+            thrs[f"fpr_{fpr}"] = float(thr)
+            logger.info(f"  [{mode_name}] FPR {fpr}: threshold = {thr:.4f}")
+        return thrs
 
-    results: Dict[str, Any] = {}
-    results["ensemble_weights"] = family_weights
-    results["val"] = evaluate_preds(y_val.values, val_probs, thresholds)
-    results["test_overall"] = evaluate_preds(
-        test_df[label_col].astype(int).values,
-        test_probs,
-        thresholds,
-    )
+    thresholds_raw = tune_thresholds(y_val.values, val_probs_raw, "raw")
+    thresholds_iso = tune_thresholds(y_val.values, val_probs_iso, "isotonic")
+    thresholds_platt = tune_thresholds(y_val.values, val_probs_platt, "platt")
 
+    # --- Evaluation ---
+    results: Dict[str, Any] = {
+        "ensemble_weights": family_weights,
+        "raw": {},
+        "isotonic": {},
+        "platt": {}
+    }
+
+    def run_eval(y_true, y_prob, thrs, section, split_key):
+        if section not in results:
+            results[section] = {}
+        results[section][split_key] = evaluate_preds(y_true, y_prob, thrs)
+
+    # Validation
+    run_eval(y_val.values, val_probs_raw, thresholds_raw, "raw", "val")
+    run_eval(y_val.values, val_probs_iso, thresholds_iso, "isotonic", "val")
+    run_eval(y_val.values, val_probs_platt, thresholds_platt, "platt", "val")
+
+    # Test Overall
+    y_test = test_df[label_col].astype(int).values
+    run_eval(y_test, test_probs_raw, thresholds_raw, "raw", "test_overall")
+    run_eval(y_test, test_probs_iso, thresholds_iso, "isotonic", "test_overall")
+    run_eval(y_test, test_probs_platt, thresholds_platt, "platt", "test_overall")
+
+    # Test Per Dataset
     for ds in test_df[dataset_col].astype(str).unique():
         mask = test_df[dataset_col].astype(str) == ds
         if mask.sum() == 0:
             continue
         y_ds = test_df.loc[mask, label_col].astype(int).values
-        p_ds = test_probs[mask]
-        results[f"test_{ds}"] = evaluate_preds(y_ds, p_ds, thresholds)
+        
+        p_raw_ds = test_probs_raw[mask]
+        p_iso_ds = test_probs_iso[mask]
+        p_platt_ds = test_probs_platt[mask]
 
+        run_eval(y_ds, p_raw_ds, thresholds_raw, "raw", f"test_{ds}")
+        run_eval(y_ds, p_iso_ds, thresholds_iso, "isotonic", f"test_{ds}")
+        run_eval(y_ds, p_platt_ds, thresholds_platt, "platt", f"test_{ds}")
+
+    # Save metrics
     with open(out_dir / "metrics.json", "w", encoding="utf-8") as f:
         json.dump(
             results,
@@ -623,13 +669,17 @@ def run_balanced_bagging(
             default=lambda x: float(x) if isinstance(x, (np.float32, np.float64)) else x,
         )
 
+    # Save calibrators
     joblib.dump(isotonic, out_dir / "isotonic_calibrator.pkl")
+    joblib.dump(platt, out_dir / "platt_calibrator.pkl")
 
+    # Save predictions
     def prepare_pred_df(
         df_split: pd.DataFrame,
         fam_probs: Dict[str, Optional[np.ndarray]],
-        probs_raw: np.ndarray,
-        probs_calib: np.ndarray,
+        p_raw: np.ndarray,
+        p_iso: np.ndarray,
+        p_platt: np.ndarray,
         split_name: str,
     ) -> pd.DataFrame:
         out = df_split[[group_col, dataset_col, label_col]].copy()
@@ -640,14 +690,18 @@ def run_balanced_bagging(
         out["p_lgbm_raw"] = fam_probs["lgbm"] if fam_probs["lgbm"] is not None else np.nan
         out["p_cat_raw"] = fam_probs["cat"] if fam_probs["cat"] is not None else np.nan
 
-        out["prob_raw"] = probs_raw
-        out["prob"] = probs_calib
+        out["prob_raw"] = p_raw
+        out["prob_iso"] = p_iso
+        out["prob_platt"] = p_platt
+        # Backward compatibility alias
+        out["prob"] = p_iso
+        
         out["split"] = split_name
         return out
 
-    pred_df_train = prepare_pred_df(train_df, train_family_probs, train_probs_raw, train_probs, "train")
-    pred_df_val = prepare_pred_df(val_df, val_family_probs, val_probs_raw, val_probs, "val")
-    pred_df_test = prepare_pred_df(test_df, test_family_probs, test_probs_raw, test_probs, "test")
+    pred_df_train = prepare_pred_df(train_df, train_family_probs, train_probs_raw, train_probs_iso, train_probs_platt, "train")
+    pred_df_val = prepare_pred_df(val_df, val_family_probs, val_probs_raw, val_probs_iso, val_probs_platt, "val")
+    pred_df_test = prepare_pred_df(test_df, test_family_probs, test_probs_raw, test_probs_iso, test_probs_platt, "test")
 
     full_pred_df = pd.concat([pred_df_train, pred_df_val, pred_df_test], ignore_index=True)
     full_pred_df.to_csv(out_dir / "predictions.csv", index=False)
