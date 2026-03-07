@@ -11,7 +11,7 @@ import json
 from scipy.optimize import minimize
 from sklearn.metrics import roc_auc_score
 from sklearn.linear_model import LogisticRegression
-isotonic import IsotonicRegression
+from sklearn.isotonic import IsotonicRegression
 
 from src.eval.metrics import binary_metrics, select_policy_thresholds, _policy_key_from_fpr, threshold_at_fpr
 
@@ -141,45 +141,47 @@ def create_ensemble(
     _ensure_parent(metrics_path)
 
     # Load predictions from individual models
+    model_to_file = {
+        "xgb": paths.artifacts_dir / "balanced_bagging_xgb" / "predictions.csv",
+        "lgbm": paths.artifacts_dir / "balanced_bagging_lgbm" / "predictions.csv",
+        "cat": paths.artifacts_dir / "balanced_bagging_cat" / "predictions.csv",
+        "xgboost": paths.artifacts_dir / "balanced_bagging_xgb" / "predictions.csv",
+        "lightgbm": paths.artifacts_dir / "balanced_bagging_lgbm" / "predictions.csv",
+        "catboost": paths.artifacts_dir / "balanced_bagging_cat" / "predictions.csv",
+    }
+
     dfs = []
+    base_df = None
+
     for m in model_names:
-        p = paths.artifacts_dir / m / "preds.parquet"
+        p = model_to_file.get(m)
+        if p is None:
+            raise ValueError(f"Unknown model name in ensemble config: {m}")
+
         if not p.exists():
-            if m == "xgboost": p = paths.artifacts_dir / "xgb" / "preds.parquet"
-            elif m == "lightgbm": p = paths.artifacts_dir / "lgbm" / "preds.parquet"
-            
-            if not p.exists():
-                raise FileNotFoundError(f"Prediction file not found for model '{m}': {p}")
-        
-        d = pd.read_parquet(p)
+            raise FileNotFoundError(f"Prediction file not found for model '{m}': {p}")
+
+        d = pd.read_csv(p)
+
         if "flow_id" not in d.columns:
-            raise ValueError(f"Model {m} preds missing flow_id")
-        
-        # Use p_raw (calibrated from model training) or specific column
-        col_name = "p_raw"
-        if col_name not in d.columns:
-            if f"p_{m}" in d.columns: col_name = f"p_{m}"
-            elif "p_xgb" in d.columns: col_name = "p_xgb"
-            elif "p_lgbm" in d.columns: col_name = "p_lgbm"
-            elif "p_catboost" in d.columns: col_name = "p_catboost"
-            else:
-                raise ValueError(f"Could not find probability column in {p}")
-        
-        subset = d[["flow_id", col_name]].rename(columns={col_name: f"p_{m}"})
+            raise ValueError(f"Model {m} predictions missing flow_id: {p}")
+
+        if "prob" not in d.columns:
+            raise ValueError(f"Model {m} predictions missing 'prob' column: {p}")
+
+        subset = d[["flow_id", "prob"]].rename(columns={"prob": f"p_{m}"})
         dfs.append(subset)
 
-    # Merge all predictions
+        if base_df is None:
+            base_df = d.copy()
+
     df_ens = dfs[0]
     for i in range(1, len(dfs)):
         df_ens = pd.merge(df_ens, dfs[i], on="flow_id", how="inner")
-
-    # Merge back metadata
-    base_df = pd.read_parquet(paths.artifacts_dir / model_names[0] / "preds.parquet")
     meta_cols = ["flow_id", label_col, split_col, "capture_id", "dataset"]
     meta_cols = [c for c in meta_cols if c in base_df.columns]
-    
-    df_ens = pd.merge(df_ens, base_df[meta_cols], on="flow_id", how="left")
 
+    df_ens = pd.merge(df_ens, base_df[meta_cols], on="flow_id", how="left")
     # Ensure dataset column exists
     if "dataset" not in df_ens.columns:
         # Try to infer or fail? For now, if missing, fill with "unknown"
@@ -272,61 +274,62 @@ def create_ensemble(
 
     # 5. Compute Metrics for All Splits
     # We report metrics using the PER-DATASET thresholds if available, else global
+    # 5. Compute Metrics for All Splits
     split_metrics = {}
-    
+
     for sp in df_ens[split_col].unique():
         sp_df = df_ens[df_ens[split_col] == sp]
-        
-        # We want to report metrics broken down by dataset as well
+
         sp_metrics = {}
-        
-        # Overall metrics for this split (using global thresholds)
+
         y_sp = sp_df[label_col].to_numpy()
         p_sp = sp_df["p_calib"].to_numpy()
-        
-        # Use firewall threshold from global set for the main "firewall_policy" entry
-        global_firewall_thr = thresholds_map["global"][_policy_key_from_fpr(firewall_fpr)]
-        
+
+        global_firewall_policy_name = _policy_key_from_fpr(firewall_fpr)
+        global_firewall_thr = thresholds_map["global"][global_firewall_policy_name]
+
         sp_metrics["overall"] = binary_metrics(
-            y_sp, 
-            p_sp, 
+            y_sp,
+            p_sp,
             threshold=global_firewall_thr,
             fixed_policy_thresholds=thresholds_map["global"]
         )
-        
-        # Per-dataset metrics
+
         for ds in sp_df["dataset"].unique():
             ds_df = sp_df[sp_df["dataset"] == ds]
-            if len(ds_df) == 0: continue
-            
+            if len(ds_df) == 0:
+                continue
+
             y_ds = ds_df[label_col].to_numpy()
             p_ds = ds_df["p_calib"].to_numpy()
-            
-            # Use per-dataset thresholds if available, else global
+
             thrs = thresholds_map.get(ds, thresholds_map["global"])
             ds_firewall_thr = thrs[_policy_key_from_fpr(firewall_fpr)]
-            
+
             sp_metrics[ds] = binary_metrics(
                 y_ds,
                 p_ds,
                 threshold=ds_firewall_thr,
                 fixed_policy_thresholds=thrs
             )
-            
+
         split_metrics[str(sp)] = sp_metrics
+
+    global_firewall_policy_name = _policy_key_from_fpr(firewall_fpr)
+    global_firewall_thr = thresholds_map["global"][global_firewall_policy_name]
 
     metrics = {
         "models": model_names,
         "weights": weight_dict,
         "thresholds_map": thresholds_map,
-        "firewall_policy_target_fpr": firewall_fpr        "policy_thresholds": {k: {"threshold": v} for k, v in selected_thresholds.items()},
+        "firewall_policy_target_fpr": firewall_fpr,
         "firewall_policy": {
-            "chosen": firewall_policy_name,
+            "chosen": global_firewall_policy_name,
             "fpr_target": firewall_fpr,
-            "threshold": firewall_thr,
-            "mode": policy_mode,
+            "threshold": global_firewall_thr,
+            "threshold_source": "global_validation_set",
         },
-        "splits": split_metrics
+        "splits": split_metrics,
     }
 
     metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
