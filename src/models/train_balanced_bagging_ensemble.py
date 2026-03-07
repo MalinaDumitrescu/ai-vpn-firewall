@@ -11,8 +11,10 @@ Method:
     - each bag contains ALL minority samples (VPN)
     - each bag contains a RANDOM SUBSET of majority samples (Non-VPN)
 - Train XGBoost, LightGBM, and CatBoost on those bags.
-- Average predicted probabilities across all trained models.
-- Tune thresholds on VAL for target FPRs.
+- Average probabilities within each family.
+- Combine family probabilities with configurable weights.
+- Fit isotonic calibration on VAL.
+- Tune thresholds on calibrated VAL for target FPRs.
 - Evaluate on TEST (overall + per dataset).
 
 This file is intentionally strict:
@@ -37,7 +39,6 @@ from sklearn.metrics import (
     confusion_matrix,
     precision_recall_fscore_support,
 )
-from sklearn.isotonic import IsotonicRegression
 
 # Attempt imports for GBDT libraries
 try:
@@ -88,6 +89,11 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="Random seed")
     parser.add_argument("--output_dir", type=str, default="artifacts/balanced_bagging", help="Output directory")
     parser.add_argument("--model_types", type=str, default="xgb,lgbm,cat", help="Comma-separated model types")
+
+    # Optional family weights
+    parser.add_argument("--weight_xgb", type=float, default=1.0, help="Weight for XGBoost family")
+    parser.add_argument("--weight_lgbm", type=float, default=1.0, help="Weight for LightGBM family")
+    parser.add_argument("--weight_cat", type=float, default=1.0, help="Weight for CatBoost family")
 
     return parser.parse_args()
 
@@ -369,6 +375,29 @@ def evaluate_preds(y_true, y_prob, thresholds: Dict[str, float]) -> Dict[str, An
     return res
 
 
+def _normalize_family_weights(
+    selected_types: List[str],
+    weight_xgb: float,
+    weight_lgbm: float,
+    weight_cat: float,
+) -> Dict[str, float]:
+    raw = {
+        "xgb": float(weight_xgb),
+        "lgbm": float(weight_lgbm),
+        "cat": float(weight_cat),
+    }
+
+    active = {k: raw[k] for k in selected_types}
+    if any(v < 0 for v in active.values()):
+        raise ValueError(f"Family weights must be >= 0. Got: {active}")
+
+    total = sum(active.values())
+    if total <= 0:
+        raise ValueError(f"Sum of active family weights must be > 0. Got: {active}")
+
+    return {k: v / total for k, v in active.items()}
+
+
 def run_balanced_bagging(
     df: pd.DataFrame,
     label_col: str = "label",
@@ -385,6 +414,9 @@ def run_balanced_bagging(
     test_list: Optional[str] = None,
     model_types: Optional[List[str]] = None,
     feature_cols: Optional[List[str]] = None,
+    weight_xgb: float = 1.0,
+    weight_lgbm: float = 1.0,
+    weight_cat: float = 1.0,
 ):
     """
     Programmatic entry point.
@@ -404,6 +436,9 @@ def run_balanced_bagging(
         train_list=train_list,
         val_list=val_list,
         test_list=test_list,
+        weight_xgb=weight_xgb,
+        weight_lgbm=weight_lgbm,
+        weight_cat=weight_cat,
     )
 
     setup_logger()
@@ -458,7 +493,15 @@ def run_balanced_bagging(
     if not selected_types:
         raise ValueError("No valid model types selected.")
 
+    family_weights = _normalize_family_weights(
+        selected_types=selected_types,
+        weight_xgb=weight_xgb,
+        weight_lgbm=weight_lgbm,
+        weight_cat=weight_cat,
+    )
+
     logger.info(f"Training {bags_per_family} bags for each of: {selected_types}")
+    logger.info(f"Normalized family weights: {family_weights}")
 
     trained_models = []
 
@@ -489,20 +532,54 @@ def run_balanced_bagging(
 
             joblib.dump(model, out_dir / f"model_{m_type}_bag{i}.pkl")
 
-    logger.info("Generating predictions...")
+    logger.info("Generating family-level predictions...")
 
-    def get_ensemble_proba(X: pd.DataFrame) -> np.ndarray:
-        preds = []
+    def get_family_probas(X: pd.DataFrame) -> Dict[str, Optional[np.ndarray]]:
+        fam_preds: Dict[str, List[np.ndarray]] = {
+            "xgb": [],
+            "lgbm": [],
+            "cat": [],
+        }
+
         for tm in trained_models:
             p = tm["model"].predict_proba(X)[:, 1]
-            preds.append(p)
-        if not preds:
-            return np.zeros(len(X), dtype=float)
-        return np.mean(preds, axis=0)
+            fam_preds[tm["type"]].append(p)
 
-    train_probs_raw = get_ensemble_proba(train_df[feature_cols])
-    val_probs_raw = get_ensemble_proba(val_df[feature_cols])
-    test_probs_raw = get_ensemble_proba(test_df[feature_cols])
+        fam_means: Dict[str, Optional[np.ndarray]] = {}
+        for fam, preds in fam_preds.items():
+            if preds:
+                fam_means[fam] = np.mean(preds, axis=0)
+            else:
+                fam_means[fam] = None
+
+        return fam_means
+
+    def combine_family_probs(fam_probs: Dict[str, Optional[np.ndarray]]) -> np.ndarray:
+        pieces = []
+        n_ref = None
+
+        for fam in ["xgb", "lgbm", "cat"]:
+            p = fam_probs.get(fam)
+            if p is None:
+                continue
+            if n_ref is None:
+                n_ref = len(p)
+            pieces.append(family_weights.get(fam, 0.0) * p)
+
+        if not pieces:
+            if n_ref is None:
+                return np.array([], dtype=float)
+            return np.zeros(n_ref, dtype=float)
+
+        return np.sum(pieces, axis=0)
+
+    train_family_probs = get_family_probas(train_df[feature_cols])
+    val_family_probs = get_family_probas(val_df[feature_cols])
+    test_family_probs = get_family_probas(test_df[feature_cols])
+
+    train_probs_raw = combine_family_probs(train_family_probs)
+    val_probs_raw = combine_family_probs(val_family_probs)
+    test_probs_raw = combine_family_probs(test_family_probs)
 
     logger.info("Fitting isotonic calibrator on validation set...")
     isotonic = IsotonicRegression(out_of_bounds="clip")
@@ -521,7 +598,8 @@ def run_balanced_bagging(
         thresholds[f"fpr_{fpr}"] = float(thr)
         logger.info(f"  FPR {fpr}: calibrated threshold = {thr:.4f}")
 
-    results = {}
+    results: Dict[str, Any] = {}
+    results["ensemble_weights"] = family_weights
     results["val"] = evaluate_preds(y_val.values, val_probs, thresholds)
     results["test_overall"] = evaluate_preds(
         test_df[label_col].astype(int).values,
@@ -544,10 +622,12 @@ def run_balanced_bagging(
             indent=2,
             default=lambda x: float(x) if isinstance(x, (np.float32, np.float64)) else x,
         )
+
     joblib.dump(isotonic, out_dir / "isotonic_calibrator.pkl")
 
     def prepare_pred_df(
         df_split: pd.DataFrame,
+        fam_probs: Dict[str, Optional[np.ndarray]],
         probs_raw: np.ndarray,
         probs_calib: np.ndarray,
         split_name: str,
@@ -555,14 +635,19 @@ def run_balanced_bagging(
         out = df_split[[group_col, dataset_col, label_col]].copy()
         if "flow_id" in df_split.columns:
             out["flow_id"] = df_split["flow_id"].values
+
+        out["p_xgb_raw"] = fam_probs["xgb"] if fam_probs["xgb"] is not None else np.nan
+        out["p_lgbm_raw"] = fam_probs["lgbm"] if fam_probs["lgbm"] is not None else np.nan
+        out["p_cat_raw"] = fam_probs["cat"] if fam_probs["cat"] is not None else np.nan
+
         out["prob_raw"] = probs_raw
         out["prob"] = probs_calib
         out["split"] = split_name
         return out
 
-    pred_df_train = prepare_pred_df(train_df, train_probs_raw, train_probs, "train")
-    pred_df_val = prepare_pred_df(val_df, val_probs_raw, val_probs, "val")
-    pred_df_test = prepare_pred_df(test_df, test_probs_raw, test_probs, "test")
+    pred_df_train = prepare_pred_df(train_df, train_family_probs, train_probs_raw, train_probs, "train")
+    pred_df_val = prepare_pred_df(val_df, val_family_probs, val_probs_raw, val_probs, "val")
+    pred_df_test = prepare_pred_df(test_df, test_family_probs, test_probs_raw, test_probs, "test")
 
     full_pred_df = pd.concat([pred_df_train, pred_df_val, pred_df_test], ignore_index=True)
     full_pred_df.to_csv(out_dir / "predictions.csv", index=False)
@@ -593,6 +678,9 @@ def main():
         test_list=args.test_list,
         model_types=model_types,
         feature_cols=None,
+        weight_xgb=args.weight_xgb,
+        weight_lgbm=args.weight_lgbm,
+        weight_cat=args.weight_cat,
     )
 
 
