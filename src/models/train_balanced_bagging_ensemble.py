@@ -256,37 +256,61 @@ def train_model(
     X_val: pd.DataFrame,
     y_val: pd.Series,
     seed: int,
+    model_params: Optional[Dict[str, Any]] = None,
 ):
     if model_type == "xgb":
         if xgb is None:
             raise ImportError("XGBoost not installed")
 
-        model = xgb.XGBClassifier(
-            n_estimators=1000,
-            learning_rate=0.05,
-            max_depth=6,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            random_state=seed,
-            n_jobs=1,
-            early_stopping_rounds=50,
-            eval_metric="logloss",
-        )
+        # Default params
+        params = {
+            "n_estimators": 1000,
+            "learning_rate": 0.05,
+            "max_depth": 6,
+            "subsample": 0.8,
+            "colsample_bytree": 0.8,
+            "random_state": seed,
+            "n_jobs": 1,
+            "early_stopping_rounds": 50,
+            "eval_metric": "logloss",
+        }
+        
+        # Override with provided params if any
+        if model_params:
+            logger.info(f"Overriding XGBoost params: {model_params}")
+            params.update(model_params)
+            # Ensure random_state is preserved if not explicitly overridden
+            if "random_state" not in model_params:
+                params["random_state"] = seed
+
+        # For XGBoost >= 1.6 (and 2.0+), early_stopping_rounds is an init parameter.
+        # We pass everything in params to the constructor.
+        model = xgb.XGBClassifier(**params)
         model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
+            
         return model
 
     elif model_type == "lgbm":
         if lgb is None:
             raise ImportError("LightGBM not installed")
 
-        model = lgb.LGBMClassifier(
-            n_estimators=1000,
-            learning_rate=0.05,
-            num_leaves=31,
-            random_state=seed,
-            n_jobs=1,
-            verbose=-1,
-        )
+        params = {
+            "n_estimators": 1000,
+            "learning_rate": 0.05,
+            "num_leaves": 31,
+            "random_state": seed,
+            "n_jobs": 1,
+            "verbose": -1,
+        }
+        
+        if model_params:
+            logger.info(f"Overriding LightGBM params: {model_params}")
+            params.update(model_params)
+            if "random_state" not in model_params:
+                params["random_state"] = seed
+
+        model = lgb.LGBMClassifier(**params)
+        
         model.fit(
             X_train,
             y_train,
@@ -300,15 +324,23 @@ def train_model(
         if cb is None:
             raise ImportError("CatBoost not installed")
 
-        model = cb.CatBoostClassifier(
-            iterations=1000,
-            learning_rate=0.05,
-            depth=6,
-            random_seed=seed,
-            thread_count=1,
-            verbose=False,
-            allow_writing_files=False,
-        )
+        params = {
+            "iterations": 1000,
+            "learning_rate": 0.05,
+            "depth": 6,
+            "random_seed": seed,
+            "thread_count": 1,
+            "verbose": False,
+            "allow_writing_files": False,
+        }
+        
+        if model_params:
+            logger.info(f"Overriding CatBoost params: {model_params}")
+            params.update(model_params)
+            if "random_seed" not in model_params:
+                params["random_seed"] = seed
+
+        model = cb.CatBoostClassifier(**params)
         model.fit(X_train, y_train, eval_set=(X_val, y_val), early_stopping_rounds=50)
         return model
 
@@ -419,6 +451,9 @@ def run_balanced_bagging(
     weight_xgb: float = 1.0,
     weight_lgbm: float = 1.0,
     weight_cat: float = 1.0,
+    xgb_params: Optional[Dict[str, Any]] = None,
+    lgbm_params: Optional[Dict[str, Any]] = None,
+    cat_params: Optional[Dict[str, Any]] = None,
 ):
     """
     Programmatic entry point.
@@ -516,13 +551,22 @@ def run_balanced_bagging(
             seed=seed,
         )
 
+        # Select params for this model type
+        current_params = None
+        if m_type == "xgb":
+            current_params = xgb_params
+        elif m_type == "lgbm":
+            current_params = lgbm_params
+        elif m_type == "cat":
+            current_params = cat_params
+
         for i, bag in enumerate(bags):
             logger.info(f"Training {m_type} bag {i + 1}/{bags_per_family}...")
             X_bag = bag[feature_cols]
             y_bag = bag[label_col].astype(int)
 
             model_seed = seed + (i * 100) + (10000 * selected_types.index(m_type))
-            model = train_model(m_type, X_bag, y_bag, X_val, y_val, model_seed)
+            model = train_model(m_type, X_bag, y_bag, X_val, y_val, model_seed, model_params=current_params)
 
             trained_models.append(
                 {
