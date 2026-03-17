@@ -68,8 +68,8 @@ class ProjectPaths:
     repo_root: Path
     configs_dir: Path
 
-    data_raw: Path
-    data_processed: Path
+    data_raw_dir: Path
+    data_processed_dir: Path
     data_splits: Path
 
     data_raw_vnat: Path
@@ -100,7 +100,7 @@ class ProjectPaths:
         If you prefer to keep raw dirs untouched (e.g., mounted volumes), set it False.
         """
         dirs = [
-            self.data_processed,
+            self.data_processed_dir,
             self.data_splits,
             self.artifacts_root,
             self.artifacts_features,
@@ -112,7 +112,7 @@ class ProjectPaths:
         ]
         if create_raw_dirs:
             dirs = [
-                self.data_raw,
+                self.data_raw_dir,
                 self.data_raw_vnat,
                 self.data_raw_iscx,
                 self.data_raw_captured,
@@ -164,8 +164,8 @@ def load_paths(config_path: Optional[Path] = None) -> ProjectPaths:
     # Reports dir (often not in yaml, so default it)
     reports_dir = _resolve_path(repo_root, str(cfg.get("reports", "reports")))
 
-    data_raw = _resolve_path(repo_root, str(data_cfg.get("raw", "data/raw")))
-    data_processed = _resolve_path(repo_root, str(data_cfg.get("processed", "data/processed")))
+    data_raw_dir = _resolve_path(repo_root, str(data_cfg.get("raw", "data/raw")))
+    data_processed_dir = _resolve_path(repo_root, str(data_cfg.get("processed", "data/processed")))
     data_splits = _resolve_path(repo_root, str(data_cfg.get("splits", "data/splits")))
 
     datasets_cfg = data_cfg.get("datasets") or {}
@@ -186,8 +186,8 @@ def load_paths(config_path: Optional[Path] = None) -> ProjectPaths:
     return ProjectPaths(
         repo_root=repo_root,
         configs_dir=configs_dir,
-        data_raw=data_raw,
-        data_processed=data_processed,
+        data_raw_dir=data_raw_dir,
+        data_processed_dir=data_processed_dir,
         data_splits=data_splits,
         data_raw_vnat=data_raw_vnat,
         data_raw_iscx=data_raw_iscx,
@@ -211,11 +211,11 @@ if __name__ == "__main__":
     print("Repo root:", paths.repo_root)
     print("Configs dir:", paths.configs_dir)
     print("Config:", paths.config_paths_yaml)
-    print("data/raw:", paths.data_raw)
+    print("data/raw:", paths.data_raw_dir)
     print("data/raw/vnat:", paths.data_raw_vnat)
     print("data/raw/iscx:", paths.data_raw_iscx)
     print("data/raw/captured:", paths.data_raw_captured)
-    print("data/processed:", paths.data_processed)
+    print("data/processed:", paths.data_processed_dir)
     print("data/splits:", paths.data_splits)
     print("artifacts/root:", paths.artifacts_root)
     print("artifacts/features:", paths.artifacts_features)
