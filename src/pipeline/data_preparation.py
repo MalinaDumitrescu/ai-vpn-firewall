@@ -42,7 +42,7 @@ def load_and_prepare_data(
     vnat_only: bool = False
 ) -> pd.DataFrame:
     """
-    Loads VNAT and ISCX datasets, extracts features, applies splits, 
+    Loads VNAT, ISCX, and USBVPN datasets, extracts features, applies splits, 
     and returns a combined DataFrame.
     """
     paths = load_paths()
@@ -53,7 +53,7 @@ def load_and_prepare_data(
 
     # --- VNAT ---
     logger.info("Loading and processing VNAT...")
-    vnat_flows = pd.read_parquet(paths.data_processed / "vnat" / "flows.parquet")
+    vnat_flows = pd.read_parquet(paths.data_processed_dir / "vnat" / "flows.parquet")
     vnat_feats = extract_features_from_flows(vnat_flows, cfg)
     vnat_feats["dataset"] = "vnat"
     
@@ -72,7 +72,7 @@ def load_and_prepare_data(
 
     # --- ISCX ---
     logger.info("Loading and processing ISCX...")
-    iscx_flows = pd.read_parquet(paths.data_processed / "iscx" / "flows.parquet")
+    iscx_flows = pd.read_parquet(paths.data_processed_dir / "iscx" / "flows.parquet")
     iscx_feats = extract_features_from_flows(iscx_flows, cfg)
     iscx_feats["dataset"] = "iscx"
 
@@ -86,11 +86,31 @@ def load_and_prepare_data(
         paths.data_splits / "iscx_test_captures.txt",
     )
 
+    # --- USBVPN ---
+    logger.info("Loading and processing USBVPN...")
+    usbvpn_flows_path = paths.data_processed_dir / "usbvpn" / "flows.parquet"
+    if usbvpn_flows_path.exists():
+        logger.info("Found USBVPN data. Loading pre-extracted features...")
+        usbvpn_feats = pd.read_parquet(usbvpn_flows_path)
+        usbvpn_feats["dataset"] = "usbvpn"
+        
+        # USBVPN already has 'split' from flow-level stratified split in the adapter notebook
+        if "split" not in usbvpn_feats.columns:
+             logger.warning("USBVPN data missing 'split' column. It will be excluded from training.")
+             usbvpn_feats["split"] = pd.NA
+             
+        if "q_min_packets_ok" in usbvpn_feats.columns:
+            usbvpn_feats = usbvpn_feats[usbvpn_feats["q_min_packets_ok"] == 1.0].copy()
+    else:
+        logger.warning(f"USBVPN flows not found at {usbvpn_flows_path}. Skipping USBVPN.")
+        usbvpn_feats = pd.DataFrame()
+
     # --- Combine ---
-    df_all = pd.concat([vnat_feats, iscx_feats], ignore_index=True)
+    df_all = pd.concat([vnat_feats, iscx_feats, usbvpn_feats], ignore_index=True)
     df_all["split"] = df_all["split"].astype(str)
     
     logger.info(f"Data loaded. Shape: {df_all.shape}")
     logger.info(f"Split counts:\n{df_all['split'].value_counts()}")
+    logger.info(f"Dataset counts:\n{df_all['dataset'].value_counts()}")
     
     return df_all

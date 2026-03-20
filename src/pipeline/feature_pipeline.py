@@ -24,10 +24,10 @@ SPLIT_COL = "split"
 DATASET_COL = "dataset"
 
 # Explicitly forbidden columns that should never enter the model
-FORBIDDEN_COLS = {"app", "file_names", "connection_str"}
+FORBIDDEN_COLS = {"app", "file_names", "connection_str", "source_file"}
 
 # Columns to explicitly exclude from model features (e.g. quality flags that are constant or not behavioral)
-EXCLUDE_FROM_MODEL = {"q_min_packets_ok", "sample_weight"}
+EXCLUDE_FROM_MODEL = {"q_min_packets_ok", "sample_weight", "q_window_complete", "q_packet_count"}
 
 
 def _ensure_numeric_finite(df: pd.DataFrame) -> pd.DataFrame:
@@ -36,7 +36,7 @@ def _ensure_numeric_finite(df: pd.DataFrame) -> pd.DataFrame:
     """
     out = df.copy()
     for c in out.columns:
-        out[c] = pd.to_numeric(out[c], errors="raise")
+        out[c] = pd.to_numeric(out[c], errors="coerce")
     out = out.replace([np.inf, -np.inf], np.nan).fillna(0.0)
     arr = out.to_numpy(dtype=float, copy=False)
     if not np.isfinite(arr).all():
