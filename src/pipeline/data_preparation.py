@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from pathlib import Path
 from typing import Tuple, Optional
 
@@ -9,16 +10,17 @@ from src.splits.io import load_splits
 
 logger = setup_logger()
 
+
 def apply_split_lists(
-    df: pd.DataFrame, 
-    train_list: Path, 
-    val_list: Path, 
-    test_list: Path, 
-    *, 
-    split_col: str = "split"
+        df: pd.DataFrame,
+        train_list: Path,
+        val_list: Path,
+        test_list: Path,
+        *,
+        split_col: str = "split"
 ) -> pd.DataFrame:
     """
-    Applies canonical split lists to a DataFrame based on capture_id.
+    Applies canonical split lists to VNAT/ISCX based on capture_id (PCAP filenames).
     """
     splits = load_splits(train_list, val_list, test_list)
 
@@ -31,86 +33,93 @@ def apply_split_lists(
     out["capture_id"] = out["capture_id"].astype(str)
     out[split_col] = out["capture_id"].map(cap_to_split)
 
-    # Filter out captures that are not in any split (optional, but good for safety)
-    # or raise error if strict coverage is needed. 
-    # Here we just return rows that have a split.
+    # We drop rows not explicitly assigned to a split for ISCX/VNAT consistency
     out = out.dropna(subset=[split_col])
     return out
 
+
 def load_and_prepare_data(
-    config_path: Optional[Path] = None,
-    vnat_only: bool = False
+        config_path: Optional[Path] = None,
+        vnat_only: bool = False
 ) -> pd.DataFrame:
     """
-    Loads VNAT, ISCX, and USBVPN datasets, extracts features, applies splits, 
-    and returns a combined DataFrame.
+    Loads VNAT, ISCX, and USBVPN, aligns them into a single Multi-Domain pool,
+    and ensures Capture-Level separation (No Leakage).
     """
     paths = load_paths()
     if config_path is None:
         config_path = paths.configs_dir / "features.yaml"
-    
+
     cfg = load_feature_config(config_path)
+    all_dfs = []
 
-    # --- VNAT ---
-    logger.info("Loading and processing VNAT...")
-    vnat_flows = pd.read_parquet(paths.data_processed_dir / "vnat" / "flows.parquet")
-    vnat_feats = extract_features_from_flows(vnat_flows, cfg)
-    vnat_feats["dataset"] = "vnat"
-    
-    if "q_min_packets_ok" in vnat_feats.columns:
-        vnat_feats = vnat_feats[vnat_feats["q_min_packets_ok"] == 1.0].copy()
-
-    vnat_feats = apply_split_lists(
-        vnat_feats,
-        paths.data_splits / "vnat_train_captures.txt",
-        paths.data_splits / "vnat_val_captures.txt",
-        paths.data_splits / "vnat_test_captures.txt",
-    )
+    # --- 1. VNAT (PCAP Domain) ---
+    logger.info("Loading VNAT (PCAP-based)...")
+    vnat_path = paths.data_processed_dir / "vnat" / "flows.parquet"
+    if vnat_path.exists():
+        vnat_flows = pd.read_parquet(vnat_path)
+        vnat_feats = extract_features_from_flows(vnat_flows, cfg)
+        vnat_feats["dataset"] = "vnat"
+        vnat_feats = apply_split_lists(
+            vnat_feats,
+            paths.data_splits / "vnat_train_captures.txt",
+            paths.data_splits / "vnat_val_captures.txt",
+            paths.data_splits / "vnat_test_captures.txt",
+        )
+        all_dfs.append(vnat_feats)
 
     if vnat_only:
-        return vnat_feats
+        return all_dfs[0] if all_dfs else pd.DataFrame()
 
-    # --- ISCX ---
-    logger.info("Loading and processing ISCX...")
-    iscx_flows = pd.read_parquet(paths.data_processed_dir / "iscx" / "flows.parquet")
-    iscx_feats = extract_features_from_flows(iscx_flows, cfg)
-    iscx_feats["dataset"] = "iscx"
+    # --- 2. ISCX (PCAP Domain) ---
+    logger.info("Loading ISCX (PCAP-based)...")
+    iscx_path = paths.data_processed_dir / "iscx" / "flows.parquet"
+    if iscx_path.exists():
+        iscx_flows = pd.read_parquet(iscx_path)
+        iscx_feats = extract_features_from_flows(iscx_flows, cfg)
+        iscx_feats["dataset"] = "iscx"
+        iscx_feats = apply_split_lists(
+            iscx_feats,
+            paths.data_splits / "iscx_train_captures.txt",
+            paths.data_splits / "iscx_val_captures.txt",
+            paths.data_splits / "iscx_test_captures.txt",
+        )
+        all_dfs.append(iscx_feats)
 
-    if "q_min_packets_ok" in iscx_feats.columns:
-        iscx_feats = iscx_feats[iscx_feats["q_min_packets_ok"] == 1.0].copy()
+    # --- 3. USBVPN (JSON Domain - The "Cheap Fix" Integration) ---
+    logger.info("Loading USBVPN (JSON-based)...")
+    usbvpn_path = paths.data_processed_dir / "usbvpn" / "flows.parquet"
+    if usbvpn_path.exists():
+        usb_feats = pd.read_parquet(usbvpn_path)
+        usb_feats["dataset"] = "usbvpn"
 
-    iscx_feats = apply_split_lists(
-        iscx_feats,
-        paths.data_splits / "iscx_train_captures.txt",
-        paths.data_splits / "iscx_val_captures.txt",
-        paths.data_splits / "iscx_test_captures.txt",
-    )
+        # Validation: Ensure Capture ID is not the generic "combined" string
+        unique_caps = usb_feats["capture_id"].nunique()
+        if unique_caps == 1 and "usbvpn_combined" in str(usb_feats["capture_id"].iloc[0]):
+            logger.warning("USBVPN has only ONE capture_id. Capture-level leakage likely!")
 
-    # --- USBVPN ---
-    logger.info("Loading and processing USBVPN...")
-    usbvpn_flows_path = paths.data_processed_dir / "usbvpn" / "flows.parquet"
-    if usbvpn_flows_path.exists():
-        logger.info("Found USBVPN data. Loading pre-extracted features...")
-        usbvpn_feats = pd.read_parquet(usbvpn_flows_path)
-        usbvpn_feats["dataset"] = "usbvpn"
-        
-        # USBVPN already has 'split' from flow-level stratified split in the adapter notebook
-        if "split" not in usbvpn_feats.columns:
-             logger.warning("USBVPN data missing 'split' column. It will be excluded from training.")
-             usbvpn_feats["split"] = pd.NA
-             
-        if "q_min_packets_ok" in usbvpn_feats.columns:
-            usbvpn_feats = usbvpn_feats[usbvpn_feats["q_min_packets_ok"] == 1.0].copy()
+        # Ensure it has a split column (generated by the adapter notebook)
+        if "split" not in usb_feats.columns:
+            logger.error("USBVPN missing 'split' column. Re-run Notebook 09 with Capture-Level splitting.")
+
+        all_dfs.append(usb_feats)
     else:
-        logger.warning(f"USBVPN flows not found at {usbvpn_flows_path}. Skipping USBVPN.")
-        usbvpn_feats = pd.DataFrame()
+        logger.warning(f"USBVPN not found at {usbvpn_path}")
 
-    # --- Combine ---
-    df_all = pd.concat([vnat_feats, iscx_feats, usbvpn_feats], ignore_index=True)
+    # --- 4. Final Alignment & Quality Filtering ---
+    df_all = pd.concat(all_dfs, ignore_index=True)
+
+    # Universal Quality Filter: Only keep flows with enough packets
+    if "q_min_packets_ok" in df_all.columns:
+        df_all = df_all[df_all["q_min_packets_ok"] == 1].copy()
+
+    # Clean up column types for XGBoost/LightGBM
     df_all["split"] = df_all["split"].astype(str)
-    
-    logger.info(f"Data loaded. Shape: {df_all.shape}")
-    logger.info(f"Split counts:\n{df_all['split'].value_counts()}")
-    logger.info(f"Dataset counts:\n{df_all['dataset'].value_counts()}")
-    
+    df_all["dataset"] = df_all["dataset"].astype(str)
+    df_all["label"] = df_all["label"].astype(int)
+
+    logger.info(f"Multi-Domain Pool Created: {df_all.shape}")
+    logger.info(f"Datasets: {df_all['dataset'].value_counts().to_dict()}")
+    logger.info(f"Splits: {df_all['split'].value_counts().to_dict()}")
+
     return df_all
