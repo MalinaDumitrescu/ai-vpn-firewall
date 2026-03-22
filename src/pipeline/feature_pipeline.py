@@ -27,7 +27,7 @@ DATASET_COL = "dataset"
 FORBIDDEN_COLS = {"app", "file_names", "connection_str", "source_file"}
 
 # Columns to explicitly exclude from model features (e.g. quality flags that are constant or not behavioral)
-EXCLUDE_FROM_MODEL = {"q_min_packets_ok", "sample_weight", "q_window_complete", "q_packet_count"}
+EXCLUDE_FROM_MODEL = {"q_min_packets_ok", "sample_weight", "q_window_complete", "q_packet_count", "tot_pkt"}
 
 
 def _ensure_numeric_finite(df: pd.DataFrame) -> pd.DataFrame:

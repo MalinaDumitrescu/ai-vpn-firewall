@@ -92,6 +92,10 @@ class ProjectPaths:
     def artifacts_dir(self) -> Path:
         return self.artifacts_root
 
+    @property
+    def data_processed(self) -> Path:
+        return self.data_processed_dir
+
     def ensure_dirs(self, create_raw_dirs: bool = True) -> None:
         """
         Create directory structure.
