@@ -18,7 +18,7 @@ from src.pipeline.artifacts import (
     write_text,
 )
 
-ID_COLS = ["flow_id", "capture_id"]
+ID_COLS = ["flow_id", "capture_id", "source_file", "source_capture_id"]
 LABEL_COL = "label"
 SPLIT_COL = "split"
 DATASET_COL = "dataset"
