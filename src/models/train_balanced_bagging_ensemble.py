@@ -249,6 +249,59 @@ def create_balanced_bags(
     return bags
 
 
+def create_diverse_bags(
+    train_df: pd.DataFrame,
+    label_col: str,
+    ratios: List[float],
+    seed: int,
+) -> List[pd.DataFrame]:
+    """
+    Create DIVERSE balanced bags from TRAIN with different majority:minority ratios.
+
+    Strategy (Professor's Diverse Bagging):
+    - Bag 1 (Sensitive): 1:1 ratio - catches most VPN traffic
+    - Bag 2 (Balanced): 1:5 ratio - balanced detection
+    - Bag 3 (Conservative): 1:10 ratio - acts as safety brake for false positives
+
+    Each bag = ALL minority + RANDOM subset of majority at specified ratio.
+    """
+    minority = train_df[train_df[label_col] == 1].copy()
+    majority = train_df[train_df[label_col] == 0].copy()
+
+    n_min = len(minority)
+    n_maj = len(majority)
+
+    if n_min == 0:
+        raise ValueError("No minority samples found in train split.")
+    if n_maj == 0:
+        raise ValueError("No majority samples found in train split.")
+
+    bags = []
+    for i, ratio in enumerate(ratios):
+        if ratio <= 0:
+            raise ValueError(f"majority_ratio must be > 0. Got {ratio}")
+
+        n_maj_sample = min(int(round(n_min * ratio)), n_maj)
+        if n_maj_sample == 0:
+            raise ValueError(f"Majority sample size computed as 0 for ratio {ratio}. Check train data.")
+
+        logger.info(
+            f"Creating diverse bag {i+1}/{len(ratios)}: ratio=1:{ratio:.1f}, "
+            f"Minority={n_min}, Sampled majority={n_maj_sample}"
+        )
+
+        maj_sample = majority.sample(
+            n=n_maj_sample,
+            replace=False,
+            random_state=seed + i,
+        )
+        bag = pd.concat([minority, maj_sample], ignore_index=True)
+        bag = bag.sample(frac=1.0, random_state=seed + i).reset_index(drop=True)
+        bags.append(bag)
+
+    return bags
+
+
 def train_model(
     model_type: str,
     X_train: pd.DataFrame,
@@ -440,6 +493,7 @@ def run_balanced_bagging(
     split_col: str = "split",
     bags_per_family: int = 3,
     majority_ratio: float = 1.0,
+    diverse_ratios: Optional[List[float]] = None,
     target_fprs: str = "0.001,0.005,0.01",
     seed: int = 42,
     output_dir: str = "artifacts/balanced_bagging",
@@ -537,19 +591,36 @@ def run_balanced_bagging(
         weight_cat=weight_cat,
     )
 
-    logger.info(f"Training {bags_per_family} bags for each of: {selected_types}")
+    # Determine bagging strategy
+    if diverse_ratios is not None:
+        logger.info(f"Using DIVERSE BAGGING strategy with ratios: {diverse_ratios}")
+        logger.info("Bag 1 (Sensitive): Low ratio for high recall")
+        logger.info("Bag 2 (Balanced): Medium ratio for balanced detection")
+        logger.info("Bag 3 (Conservative): High ratio as safety brake for FPR")
+    else:
+        logger.info(f"Using UNIFORM BAGGING: {bags_per_family} bags with ratio 1:{majority_ratio}")
+
+    logger.info(f"Training bags for each of: {selected_types}")
     logger.info(f"Normalized family weights: {family_weights}")
 
     trained_models = []
 
     for m_type in selected_types:
-        bags = create_balanced_bags(
-            train_df=train_df,
-            label_col=label_col,
-            n_bags=bags_per_family,
-            ratio=majority_ratio,
-            seed=seed,
-        )
+        if diverse_ratios is not None:
+            bags = create_diverse_bags(
+                train_df=train_df,
+                label_col=label_col,
+                ratios=diverse_ratios,
+                seed=seed,
+            )
+        else:
+            bags = create_balanced_bags(
+                train_df=train_df,
+                label_col=label_col,
+                n_bags=bags_per_family,
+                ratio=majority_ratio,
+                seed=seed,
+            )
 
         # Select params for this model type
         current_params = None
@@ -630,15 +701,39 @@ def run_balanced_bagging(
     # --- Calibration ---
     logger.info("Fitting calibrators on validation set...")
 
-    # 1. Isotonic
-    isotonic = IsotonicRegression(out_of_bounds="clip")
-    isotonic.fit(val_probs_raw, y_val.values)
+    def fit_calibration_and_tuning(val_probs_raw, y_val, target_fprs_list):
+        # 1. Isotonic
+        isotonic = IsotonicRegression(out_of_bounds="clip")
+        isotonic.fit(val_probs_raw, y_val.values)
 
-    # 2. Platt (Logistic)
-    # Reshape for sklearn
-    X_val_calib = val_probs_raw.reshape(-1, 1)
-    platt = LogisticRegression(random_state=seed, solver='lbfgs')
-    platt.fit(X_val_calib, y_val.values)
+        # 2. Platt (Logistic)
+        # Reshape for sklearn
+        X_val_calib = val_probs_raw.reshape(-1, 1)
+        platt = LogisticRegression(random_state=seed, solver='lbfgs')
+        platt.fit(X_val_calib, y_val.values)
+        
+        # We need a new target FPR tuner
+        logger.info("Finding safety buffer gap...")
+        
+        # Calculate Isotonic focus Safety Buffer Focus
+        val_probs_iso = isotonic.transform(val_probs_raw)
+        
+        benign_probs = val_probs_iso[y_val.values == 0]
+        vpn_probs = val_probs_iso[y_val.values == 1]
+        
+        if len(benign_probs) > 0 and len(vpn_probs) > 0:
+            max_benign_prob = benign_probs.max()
+            min_vpn_prob = vpn_probs.min()
+            logger.info(f"Isotonic Focus -> Max Benign Prob: {max_benign_prob:.6f}, Min VPN Prob: {min_vpn_prob:.6f}")
+            if min_vpn_prob > max_benign_prob:
+                logger.info(f"Found Safety Buffer Gap! Width: {min_vpn_prob - max_benign_prob:.6f}")
+            else:
+                logger.info(f"Overlap detected. No strict safety buffer gap found.")
+        
+        return isotonic, platt
+
+    target_fprs_list = [float(x) for x in target_fprs.split(",")]
+    isotonic, platt = fit_calibration_and_tuning(val_probs_raw, y_val, target_fprs_list)
 
     # Transform all splits
     train_probs_iso = isotonic.transform(train_probs_raw)
@@ -651,12 +746,17 @@ def run_balanced_bagging(
 
     # --- Threshold Tuning ---
     logger.info("Tuning thresholds on calibrated validation set...")
-    target_fprs_list = [float(x) for x in target_fprs.split(",")]
 
     def tune_thresholds(y_true, y_prob, mode_name):
         thrs = {"default": 0.5}
-        for fpr in target_fprs_list:
+        # Explicit 0 FPR tuning for the deployable firewall
+        fprs_to_tune = target_fprs_list.copy()
+        if 0.0 not in fprs_to_tune:
+            fprs_to_tune.insert(0, 0.0)
+            
+        for fpr in fprs_to_tune:
             thr = threshold_at_fpr(y_true, y_prob, fpr)
+            # Use 'fpr_0.0' explicitly to avoid any floating point parsing bugs later
             thrs[f"fpr_{fpr}"] = float(thr)
             logger.info(f"  [{mode_name}] FPR {fpr}: threshold = {thr:.4f}")
         return thrs

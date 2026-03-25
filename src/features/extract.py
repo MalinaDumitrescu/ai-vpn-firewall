@@ -235,6 +235,10 @@ def extract_features_from_flows(
         for k, v in st_sz_all.items():
             if k in ("count", "sum", "min", "max"): continue
             feat[f"sz_all_{k}"] = v
+
+        # Coefficient of Variation: unitless burstiness metric
+        sz_cv = st_sz_all["std"] / st_sz_all["mean"] if st_sz_all["mean"] > 0 else 0.0
+        feat["sz_cv"] = float(sz_cv)
         
         # CHANGED: Direction-invariant stats
         # Instead of up/down, we aggregate them into "primary" (larger volume) and "secondary" (smaller volume)
