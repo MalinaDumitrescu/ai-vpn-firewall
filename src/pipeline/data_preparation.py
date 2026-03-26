@@ -28,14 +28,15 @@ def apply_split_lists(
     cap_to_split = {}
     for split_name, caps in splits.items():
         for cid in caps:
-            cap_to_split[str(cid)] = split_name
-
+            clean_cid = str(cid).replace(".pcapng", "").replace(".pcap", "").strip()
+            cap_to_split[clean_cid] = split_name
     out = df.copy()
-    out["capture_id"] = out["capture_id"].astype(str)
-    out[split_col] = out["capture_id"].map(cap_to_split)
+    out["temp_match_id"] = out["capture_id"].astype(str).str.replace(".pcapng", "").str.replace(".pcap", "").str.strip()
+    out[split_col] = out["temp_match_id"].map(cap_to_split)
 
     out = out.dropna(subset=[split_col]).copy()
     out[split_col] = out[split_col].astype(str)
+    out = out.drop(columns=["temp_match_id"])
     return out
 
 

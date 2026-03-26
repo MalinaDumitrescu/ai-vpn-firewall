@@ -36,9 +36,11 @@ FORBIDDEN_COLS = {
 EXCLUDE_FROM_MODEL = {
     "q_min_packets_ok",
     "sample_weight",
-    "q_window_complete",
-    "q_packet_count",
-    "tot_pkt",
+    "q_window_complete",  # Artifact leak
+    "q_packet_count",  # Training window leak
+    "tot_pkt",  # Session length leak
+    "source_file",  # ID leak
+    "source_capture_id",  # ID leak
 }
 
 
