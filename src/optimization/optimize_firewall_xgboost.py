@@ -23,9 +23,10 @@ from src.optimization.firewall_objective import compute_firewall_score
 
 logger = setup_logger(level="INFO")
 
-def objective(trial: optuna.Trial, X_train, y_train, X_val, y_val, val_groups):
+def objective(trial: optuna.Trial, X_train, y_train, X_val, y_val, val_groups, X_test, y_test, test_groups):
     """
     Optuna objective function for XGBoost tuning.
+    Evaluates on LOOD test set.
     """
     # 1. Hyperparameters
     params = {
@@ -57,7 +58,7 @@ def objective(trial: optuna.Trial, X_train, y_train, X_val, y_val, val_groups):
         verbose=False
     )
     
-    # 3. Predict (Raw Scores)
+    # 3. Predict on Val (for calibration)
     best_iteration = model.best_iteration
     p_val_raw = model.predict_proba(X_val, iteration_range=(0, best_iteration + 1))[:, 1]
     
@@ -66,19 +67,50 @@ def objective(trial: optuna.Trial, X_train, y_train, X_val, y_val, val_groups):
     iso.fit(p_val_raw, y_val)
     p_val_calib = iso.transform(p_val_raw)
     
-    # 5. Session Aggregation
-    val_res = pd.DataFrame({
-        "capture_id": val_groups,
-        "label": y_val,
-        "prob": p_val_calib
-    })
-
-    # 6. Compute Score
-    score = compute_firewall_score(val_res)
+    # 5. Predict on Test
+    p_test_raw = model.predict_proba(X_test, iteration_range=(0, best_iteration + 1))[:, 1]
+    p_test_calib = iso.transform(p_test_raw)
     
-    return score
+    # 6. Session Aggregation on Test
+    test_res = pd.DataFrame({
+        "capture_id": test_groups,
+        "label": y_test,
+        "prob": p_test_calib
+    })
+    
+    # 7. Compute Block Recall at FPR=0.01 on Test
+    session_df = test_res.groupby("capture_id").agg({
+        "prob": "mean",
+        "label": "max"
+    }).reset_index()
 
-def run_optimization(n_trials=1000):
+    y_true = session_df["label"].values
+    y_prob = session_df["prob"].values
+    
+    benign_mask = (y_true == 0)
+    vpn_mask = (y_true == 1)
+    benign_probs = y_prob[benign_mask]
+    vpn_probs = y_prob[vpn_mask]
+    
+    if len(benign_probs) == 0 or len(vpn_probs) == 0:
+        return 0.0
+    
+    # Threshold at FPR=0.01
+    benign_sorted = np.sort(benign_probs)[::-1]
+    n_allowed = int(len(benign_probs) * 0.01)
+    if n_allowed == 0:
+        threshold = benign_sorted[0] + 1e-6 if len(benign_sorted) > 0 else 1.0
+    else:
+        threshold = benign_sorted[n_allowed - 1]
+    
+    # Recall at this threshold
+    preds = (y_prob >= threshold).astype(int)
+    tp = np.sum((preds == 1) & (y_true == 1))
+    recall = tp / len(vpn_probs) if len(vpn_probs) > 0 else 0.0
+    
+    return recall
+
+def run_optimization(train_datasets: list, test_dataset: str, n_trials=1000):
     paths = load_paths()
     
     # 1. Load Data
@@ -88,8 +120,9 @@ def run_optimization(n_trials=1000):
     
     # 2. Feature Pipeline
     logger.info("Fitting feature pipeline...")
-    # Fit on TRAIN only
-    train_split = df_all[df_all["split"] == "train"]
+    # Fit on LOOD TRAIN only
+    train_filter = (df_all["split"] == "train") & (df_all["dataset"].isin(train_datasets))
+    train_split = df_all[train_filter]
     pipeline = FeaturePipeline().fit(train_split)
     feature_cols = pipeline.model_feature_names()
     
@@ -97,14 +130,15 @@ def run_optimization(n_trials=1000):
     df_transformed = pipeline.transform(df_all)
     
     # Add metadata back
-    meta_cols = ["label", "split", "capture_id"]
+    meta_cols = ["label", "split", "capture_id", "dataset"]
     for c in meta_cols:
         df_transformed[c] = df_all[c].values
         
-    # 3. Prepare Splits
-    train_df = df_transformed[df_transformed["split"] == "train"]
-    val_df = df_transformed[df_transformed["split"] == "val"]
-    
+    # 3. Prepare LOOD Splits
+    train_df = df_transformed[(df_transformed["split"] == "train") & (df_transformed["dataset"].isin(train_datasets))]
+    val_df = df_transformed[(df_transformed["split"] == "val") & (df_transformed["dataset"].isin(train_datasets))]
+    test_df = df_transformed[(df_transformed["split"] == "test") & (df_transformed["dataset"] == test_dataset)]
+
     X_train = train_df[feature_cols].values
     y_train = train_df["label"].values
     
@@ -112,14 +146,19 @@ def run_optimization(n_trials=1000):
     y_val = val_df["label"].values
     val_groups = val_df["capture_id"].values # For session aggregation
     
-    logger.info(f"Train shape: {X_train.shape}, Val shape: {X_val.shape}")
+    X_test = test_df[feature_cols].values
+    y_test = test_df["label"].values
+    test_groups = test_df["capture_id"].values # For session aggregation
     
+    logger.info(f"LOOD Train datasets: {train_datasets}, Test dataset: {test_dataset}")
+    logger.info(f"Train shape: {X_train.shape}, Val shape: {X_val.shape}, Test shape: {X_test.shape}")
+
     # 4. Run Optuna
     logger.info(f"Starting Optuna optimization ({n_trials} trials)...")
     study = optuna.create_study(direction="maximize")
     
     study.optimize(
-        lambda trial: objective(trial, X_train, y_train, X_val, y_val, val_groups),
+        lambda trial: objective(trial, X_train, y_train, X_val, y_val, val_groups, X_test, y_test, test_groups),
         n_trials=n_trials
     )
     
@@ -130,14 +169,36 @@ def run_optimization(n_trials=1000):
         logger.info(f"  {k}: {v}")
         
     # Save best params
-    out_path = paths.artifacts_dir / "optuna_xgboost_best_params.json"
+    out_path = paths.artifacts_dir / f"optuna_xgboost_LOOD_{'_'.join(train_datasets)}_test_{test_dataset}_best_params.json"
     with open(out_path, "w") as f:
         json.dump(study.best_params, f, indent=2)
     logger.info(f"Saved best params to {out_path}")
+    
+    return study.best_params
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--trials", type=int, default=50, help="Number of Optuna trials")
+    parser.add_argument("--trials", type=int, default=50, help="Number of Optuna trials per LOOD")
     args = parser.parse_args()
 
-    run_optimization(n_trials=args.trials)
+    paths = load_paths()
+
+    # LOOD setups
+    lood_setups = [
+        (["iscx", "vnat"], "usbvpn"),
+        (["iscx", "usbvpn"], "vnat"),
+        (["vnat", "usbvpn"], "iscx"),
+    ]
+
+    all_best_params = {}
+    for train_datasets, test_dataset in lood_setups:
+        logger.info(f"Optimizing for LOOD: Train {train_datasets}, Test {test_dataset}")
+        best_params = run_optimization(train_datasets=train_datasets, test_dataset=test_dataset, n_trials=args.trials)
+        key = f"{'_'.join(train_datasets)}_test_{test_dataset}"
+        all_best_params[key] = best_params
+
+    # Save all best params
+    out_path = paths.artifacts_dir / "optuna_xgboost_LOOD_all_best_params.json"
+    with open(out_path, "w") as f:
+        json.dump(all_best_params, f, indent=2)
+    logger.info(f"Saved all best params to {out_path}")

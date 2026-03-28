@@ -54,7 +54,6 @@ def main() -> None:
         "sizes",
         "directions",
         "packet_count",
-        "window_complete",
         "min_packets_ok",
     ]
     flows = pd.read_parquet(flows_parquet, columns=cols_needed)

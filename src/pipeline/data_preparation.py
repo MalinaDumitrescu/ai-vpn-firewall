@@ -1,10 +1,11 @@
 import pandas as pd
 from pathlib import Path
 from typing import Optional
+import numpy as np
 
 from src.utils.paths import load_paths
 from src.utils.logging import setup_logger
-from src.features.extract import load_feature_config, extract_features_from_flows
+from src.features.extract import load_feature_config
 from src.splits.io import load_splits
 
 logger = setup_logger()
@@ -70,7 +71,7 @@ def load_and_prepare_data(
     vnat_path = paths.data_processed_dir / "vnat" / "flows.parquet"
     if vnat_path.exists():
         vnat_flows = pd.read_parquet(vnat_path)
-        vnat_feats = extract_features_from_flows(vnat_flows, cfg)
+        vnat_feats = vnat_flows.copy()
         vnat_feats["dataset"] = "vnat"
         vnat_feats = apply_split_lists(
             vnat_feats,
@@ -90,7 +91,7 @@ def load_and_prepare_data(
     iscx_path = paths.data_processed_dir / "iscx" / "flows.parquet"
     if iscx_path.exists():
         iscx_flows = pd.read_parquet(iscx_path)
-        iscx_feats = extract_features_from_flows(iscx_flows, cfg)
+        iscx_feats = iscx_flows.copy()
         iscx_feats["dataset"] = "iscx"
         iscx_feats = apply_split_lists(
             iscx_feats,
@@ -141,6 +142,40 @@ def load_and_prepare_data(
     df_all["dataset"] = df_all["dataset"].astype(str)
     df_all["label"] = df_all["label"].astype(int)
 
+    # FIX: Ensure all numeric feature columns are properly typed for XGBoost
+    # XGBoost requires int, float, bool, or category dtypes, not object
+    logger.info("Ensuring numeric dtypes for feature columns...")
+    
+    # Identify feature columns (exclude metadata)
+    exclude_cols = {"flow_id", "capture_id", "source_file", "source_capture_id", 
+                   "split", "dataset", "label", "app", "connection_str"}
+    
+    feature_cols = [c for c in df_all.columns if c not in exclude_cols]
+    
+    for col in feature_cols:
+        if df_all[col].dtype == 'object':
+            logger.warning(f"Converting object column '{col}' to numeric")
+            # Convert to numeric, coercing errors to NaN
+            df_all[col] = pd.to_numeric(df_all[col], errors='coerce')
+        
+        # Ensure numeric columns are float64 (XGBoost compatible)
+        if df_all[col].dtype in ['int64', 'int32', 'float32', 'float64']:
+            df_all[col] = df_all[col].astype('float64')
+    
+    # Fill any NaN values that were created during conversion
+    numeric_cols = df_all.select_dtypes(include=[np.number]).columns
+    df_all[numeric_cols] = df_all[numeric_cols].fillna(0.0)
+
+    # DEBUG: Verify conversion worked
+    object_feature_cols = [c for c in feature_cols if df_all[c].dtype == 'object']
+    if object_feature_cols:
+        logger.error(f"FAILED to convert these feature columns to numeric: {object_feature_cols}")
+        for col in object_feature_cols[:3]:
+            unique_vals = df_all[col].dropna().unique()[:5]
+            logger.error(f"  {col} sample values: {unique_vals}")
+    else:
+        logger.info("✓ All feature columns successfully converted to numeric dtypes")
+
     _validate_no_forbidden_model_metadata(df_all)
 
     logger.info(f"Multi-Domain Pool Created: {df_all.shape}")
@@ -148,3 +183,4 @@ def load_and_prepare_data(
     logger.info(f"Splits: {df_all['split'].value_counts().to_dict()}")
 
     return df_all
+

@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from src.features.histograms import HistSpec, fixed_hist
 from src.features.window_quality import WindowQuality, quality_features
 
 
@@ -19,12 +18,6 @@ class FeatureConfig:
     N: int
     min_packets: int
     eps: float
-
-    size_bins: List[float]
-    size_max: float
-
-    iat_bins: List[float]
-    iat_max: float
 
 
 def load_feature_config(features_yaml: Path) -> FeatureConfig:
@@ -35,29 +28,10 @@ def load_feature_config(features_yaml: Path) -> FeatureConfig:
     min_packets = int(w.get("min_packets", 10))
     eps = float(w.get("eps", 1e-6))
 
-    h = cfg.get("histograms") or {}
-    size = h.get("size") or {}
-    iat = h.get("iat") or {}
-
-    size_bins = list(map(float, size.get("bins", [])))
-    iat_bins = list(map(float, iat.get("bins", [])))
-
-    if len(size_bins) < 2:
-        raise ValueError("features.yaml: histograms.size.bins must have at least 2 edges")
-    if len(iat_bins) < 2:
-        raise ValueError("features.yaml: histograms.iat.bins must have at least 2 edges")
-
-    size_max = float(size.get("max_size", 2000))
-    iat_max = float(iat.get("max_iat", 2.0))
-
     return FeatureConfig(
         N=N,
         min_packets=min_packets,
         eps=eps,
-        size_bins=size_bins,
-        size_max=size_max,
-        iat_bins=iat_bins,
-        iat_max=iat_max,
     )
 
 
@@ -119,9 +93,6 @@ def extract_features_from_flows(
         flows: pd.DataFrame,
         cfg: FeatureConfig,
 ) -> pd.DataFrame:
-    size_spec = HistSpec(bins=cfg.size_bins, max_value=cfg.size_max, normalize=True)
-    iat_spec = HistSpec(bins=cfg.iat_bins, max_value=cfg.iat_max, normalize=True)
-
     rows: List[Dict[str, float | int | str]] = []
 
     for r in flows.itertuples(index=False):
@@ -154,11 +125,12 @@ def extract_features_from_flows(
         }
 
         # 2. Add sz_cv (Unitless robustness metric)
-        feat["sz_cv"] = float(st_sz_all["std"] / st_sz_all["mean"]) if st_sz_all["mean"] > 0 else 0.0
+        feat["sz_coef_variation"] = float(st_sz_all["std"] / st_sz_all["mean"]) if st_sz_all["mean"] > 0 else 0.0
 
-        # 3. Add Size stats (dropping cheating artifacts count/sum/min/max)
-        for k in ("mean", "std", "p25", "median", "p75"):
-            feat[f"sz_all_{k}"] = st_sz_all[k]
+        # 3. Add Size ratios (replacing raw stats with ratios)
+        feat["sz_p25_median_ratio"] = st_sz_all["p25"] / st_sz_all["median"] if st_sz_all["median"] > 0 else 0.0
+        feat["sz_p75_median_ratio"] = st_sz_all["p75"] / st_sz_all["median"] if st_sz_all["median"] > 0 else 0.0
+        feat["sz_max_min_ratio"] = st_sz_all["max"] / st_sz_all["min"] if st_sz_all["min"] > 0 else 0.0
 
         # 4. Add Direction-Invariant Size Metrics
         feat["sz_mean_max"] = max(st_sz_up["mean"], st_sz_down["mean"])
@@ -175,18 +147,9 @@ def extract_features_from_flows(
         feat["iat_std_max"] = max(st_iat_up["std"], st_iat_down["std"])
         feat["iat_std_min"] = min(st_iat_up["std"], st_iat_down["std"])
 
-        # 6. Histograms
-        h_size_all = fixed_hist(sz, size_spec)
-        h_iat_all = fixed_hist(iat_all, iat_spec)
-        for i, v in enumerate(h_size_all):
-            feat[f"h_size_all_{i:02d}"] = float(v)
-        for i, v in enumerate(h_iat_all):
-            feat[f"h_iat_all_{i:02d}"] = float(v)
-
-        # 7. Window Quality
+        # 6. Window Quality
         q = WindowQuality(
             packet_count=int(n),
-            window_complete=bool(n >= cfg.N),
             min_packets_ok=bool(n >= cfg.min_packets),
         )
         feat.update(quality_features(q))
@@ -194,6 +157,49 @@ def extract_features_from_flows(
         rows.append(feat)
 
     out = pd.DataFrame(rows)
+
+    # Compute session-level invariance features
+    session_features = []
+    for capture_id, group in out.groupby('capture_id'):
+        # Use sz_coef_variation as the "probability" proxy for session features
+        probs = group['sz_coef_variation'].values
+        
+        if len(probs) == 0:
+            continue
+            
+        mean_prob = float(np.mean(probs))
+        var_prob = float(np.var(probs))
+        
+        top_k = min(3, len(probs))
+        top_k_mean = float(np.mean(np.sort(probs)[-top_k:]))
+        
+        threshold = float(np.median(probs))
+        fraction = float(np.mean(probs > threshold))
+        
+        # Consecutive high-prob runs (runs of 2+ consecutive > threshold)
+        runs = 0
+        current_run = 0
+        for p in probs:
+            if p > threshold:
+                current_run += 1
+            else:
+                if current_run >= 2:
+                    runs += 1
+                current_run = 0
+        if current_run >= 2:
+            runs += 1
+        
+        session_features.append({
+            'capture_id': capture_id,
+            'session_mean_prob': mean_prob,
+            'session_var_prob': var_prob,
+            'session_top_k_mean_prob': top_k_mean,
+            'session_consecutive_high_runs': runs,
+            'session_fraction_high': fraction
+        })
+    
+    session_df = pd.DataFrame(session_features)
+    out = out.merge(session_df, on='capture_id', how='left')
 
     # Final cleanup
     id_cols = {"flow_id", "capture_id"}
