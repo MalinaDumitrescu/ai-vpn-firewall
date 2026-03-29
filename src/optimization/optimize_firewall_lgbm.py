@@ -26,6 +26,7 @@ logger = setup_logger(level="INFO")
 def objective(trial: optuna.Trial, X_train, y_train, X_val, y_val, val_groups):
     """
     Optuna objective function for LightGBM tuning.
+    Evaluates on validation set only.
     """
     # 1. Hyperparameters
     params = {
@@ -63,8 +64,7 @@ def objective(trial: optuna.Trial, X_train, y_train, X_val, y_val, val_groups):
         callbacks=callbacks
     )
     
-    # 3. Predict (Raw Scores)
-    # LGBM returns raw probabilities by default
+    # 3. Predict (Raw Scores) on Val
     p_val_raw = model.predict_proba(X_val, num_iteration=model.best_iteration_)[:, 1]
     
     # 4. Calibrate (Isotonic)
@@ -72,14 +72,14 @@ def objective(trial: optuna.Trial, X_train, y_train, X_val, y_val, val_groups):
     iso.fit(p_val_raw, y_val)
     p_val_calib = iso.transform(p_val_raw)
     
-    # 5. Session Aggregation
+    # 5. Session Aggregation on Val
     val_res = pd.DataFrame({
         "capture_id": val_groups,
         "label": y_val,
         "prob": p_val_calib
     })
 
-    # 6. Compute Score
+    # 6. Compute Score on Val
     score = compute_firewall_score(val_res)
     
     return score
@@ -108,6 +108,7 @@ def run_optimization(n_trials=100):
     # 3. Prepare Splits
     train_df = df_transformed[df_transformed["split"] == "train"]
     val_df = df_transformed[df_transformed["split"] == "val"]
+    test_df = df_transformed[df_transformed["split"] == "test"]
     
     X_train = train_df[feature_cols].values
     y_train = train_df["label"].values
@@ -116,7 +117,11 @@ def run_optimization(n_trials=100):
     y_val = val_df["label"].values
     val_groups = val_df["capture_id"].values 
     
-    logger.info(f"Train shape: {X_train.shape}, Val shape: {X_val.shape}")
+    X_test = test_df[feature_cols].values
+    y_test = test_df["label"].values
+    test_groups = test_df["capture_id"].values 
+    
+    logger.info(f"Train shape: {X_train.shape}, Val shape: {X_val.shape}, Test shape: {X_test.shape}")
     
     # 4. Run Optuna
     logger.info(f"Starting Optuna optimization ({n_trials} trials)...")
@@ -128,10 +133,54 @@ def run_optimization(n_trials=100):
     )
     
     logger.info("Optimization finished.")
-    logger.info(f"Best trial score: {study.best_value}")
+    logger.info(f"Best trial val score: {study.best_value}")
     logger.info("Best params:")
     for k, v in study.best_params.items():
         logger.info(f"  {k}: {v}")
+        
+    # 5. Final Evaluation on TEST
+    logger.info("Evaluating best model on holdout test set...")
+    
+    best_params = study.best_params
+    best_params["objective"] = "binary"
+    best_params["metric"] = "binary_logloss"
+    best_params["boosting_type"] = "gbdt"
+    best_params["n_estimators"] = 1000
+    best_params["verbose"] = -1
+    best_params["random_state"] = 42
+    best_params["n_jobs"] = 1
+    
+    best_model = lgb.LGBMClassifier(**best_params)
+    
+    callbacks = [
+        lgb.early_stopping(50, verbose=False),
+        lgb.log_evaluation(0)
+    ]
+    
+    best_model.fit(
+        X_train, 
+        y_train, 
+        eval_set=[(X_val, y_val)], 
+        eval_metric="binary_logloss",
+        callbacks=callbacks
+    )
+    
+    p_val_raw = best_model.predict_proba(X_val, num_iteration=best_model.best_iteration_)[:, 1]
+    
+    iso = IsotonicRegression(out_of_bounds="clip")
+    iso.fit(p_val_raw, y_val)
+    
+    p_test_raw = best_model.predict_proba(X_test, num_iteration=best_model.best_iteration_)[:, 1]
+    p_test_calib = iso.transform(p_test_raw)
+    
+    test_res = pd.DataFrame({
+        "capture_id": test_groups,
+        "label": y_test,
+        "prob": p_test_calib
+    })
+    
+    test_score = compute_firewall_score(test_res)
+    logger.info(f"Final TEST Firewall Score: {test_score:.4f}")
         
     # Save best params
     out_path = paths.artifacts_dir / "optuna_lgbm_best_params.json"

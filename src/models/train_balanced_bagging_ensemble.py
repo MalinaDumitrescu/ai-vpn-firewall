@@ -62,6 +62,7 @@ except ImportError:
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 from src.utils.logging import setup_logger
 from src.eval.metrics import threshold_at_fpr
+from src.eval.session_metrics import aggregate_to_session, session_metrics
 from src.splits.io import load_splits
 
 
@@ -423,7 +424,15 @@ def get_feature_cols(df: pd.DataFrame, args: argparse.Namespace) -> List[str]:
     return [c for c in df.columns if c not in exclude and pd.api.types.is_numeric_dtype(df[c])]
 
 
-def evaluate_preds(y_true, y_prob, thresholds: Dict[str, float]) -> Dict[str, Any]:
+def evaluate_preds(
+    y_true: np.ndarray, 
+    y_prob: np.ndarray, 
+    thresholds: Dict[str, float], 
+    df: Optional[pd.DataFrame] = None, 
+    label_col: str = "label", 
+    group_col: str = "capture_id",
+    target_fprs_list: Optional[List[float]] = None
+) -> Dict[str, Any]:
     res = {}
 
     try:
@@ -458,6 +467,16 @@ def evaluate_preds(y_true, y_prob, thresholds: Dict[str, float]) -> Dict[str, An
                 "tp": int(tp),
             },
         }
+
+    # Add session metrics if df is provided
+    if df is not None:
+        temp_df = df[[label_col, group_col]].copy()
+        temp_df["prob"] = y_prob
+        session_df = aggregate_to_session(temp_df, prob_col="prob", label_col=label_col, session_col=group_col)
+        
+        low_fprs = tuple(f for f in (target_fprs_list or [0.001, 0.005, 0.01]) if f > 0.0)
+        s_metrics = session_metrics(session_df, low_fpr_targets=low_fprs)
+        res["session_metrics"] = s_metrics
 
     return res
 
@@ -773,21 +792,23 @@ def run_balanced_bagging(
         "platt": {}
     }
 
-    def run_eval(y_true, y_prob, thrs, section, split_key):
+    def run_eval(y_true, y_prob, thrs, section, split_key, df_eval=None):
         if section not in results:
             results[section] = {}
-        results[section][split_key] = evaluate_preds(y_true, y_prob, thrs)
+        results[section][split_key] = evaluate_preds(
+            y_true, y_prob, thrs, df=df_eval, label_col=label_col, group_col=group_col, target_fprs_list=target_fprs_list
+        )
 
     # Validation
-    run_eval(y_val.values, val_probs_raw, thresholds_raw, "raw", "val")
-    run_eval(y_val.values, val_probs_iso, thresholds_iso, "isotonic", "val")
-    run_eval(y_val.values, val_probs_platt, thresholds_platt, "platt", "val")
+    run_eval(y_val.values, val_probs_raw, thresholds_raw, "raw", "val", df_eval=val_df)
+    run_eval(y_val.values, val_probs_iso, thresholds_iso, "isotonic", "val", df_eval=val_df)
+    run_eval(y_val.values, val_probs_platt, thresholds_platt, "platt", "val", df_eval=val_df)
 
     # Test Overall
     y_test = test_df[label_col].astype(int).values
-    run_eval(y_test, test_probs_raw, thresholds_raw, "raw", "test_overall")
-    run_eval(y_test, test_probs_iso, thresholds_iso, "isotonic", "test_overall")
-    run_eval(y_test, test_probs_platt, thresholds_platt, "platt", "test_overall")
+    run_eval(y_test, test_probs_raw, thresholds_raw, "raw", "test_overall", df_eval=test_df)
+    run_eval(y_test, test_probs_iso, thresholds_iso, "isotonic", "test_overall", df_eval=test_df)
+    run_eval(y_test, test_probs_platt, thresholds_platt, "platt", "test_overall", df_eval=test_df)
 
     # Test Per Dataset
     for ds in test_df[dataset_col].astype(str).unique():
@@ -795,14 +816,15 @@ def run_balanced_bagging(
         if mask.sum() == 0:
             continue
         y_ds = test_df.loc[mask, label_col].astype(int).values
+        df_ds = test_df.loc[mask].copy()
         
         p_raw_ds = test_probs_raw[mask]
         p_iso_ds = test_probs_iso[mask]
         p_platt_ds = test_probs_platt[mask]
 
-        run_eval(y_ds, p_raw_ds, thresholds_raw, "raw", f"test_{ds}")
-        run_eval(y_ds, p_iso_ds, thresholds_iso, "isotonic", f"test_{ds}")
-        run_eval(y_ds, p_platt_ds, thresholds_platt, "platt", f"test_{ds}")
+        run_eval(y_ds, p_raw_ds, thresholds_raw, "raw", f"test_{ds}", df_eval=df_ds)
+        run_eval(y_ds, p_iso_ds, thresholds_iso, "isotonic", f"test_{ds}", df_eval=df_ds)
+        run_eval(y_ds, p_platt_ds, thresholds_platt, "platt", f"test_{ds}", df_eval=df_ds)
 
     # Save metrics
     with open(out_dir / "metrics.json", "w", encoding="utf-8") as f:
