@@ -23,10 +23,10 @@ from src.optimization.firewall_objective import compute_firewall_score
 
 logger = setup_logger(level="INFO")
 
-def objective(trial: optuna.Trial, X_train, y_train, X_val, y_val, val_groups, X_test, y_test, test_groups):
+def objective(trial: optuna.Trial, X_train, y_train, X_val, y_val, val_groups):
     """
     Optuna objective function for XGBoost tuning.
-    Evaluates on LOOD test set.
+    Evaluates on validation set only.
     """
     # 1. Hyperparameters
     params = {
@@ -66,49 +66,18 @@ def objective(trial: optuna.Trial, X_train, y_train, X_val, y_val, val_groups, X
     iso = IsotonicRegression(out_of_bounds="clip")
     iso.fit(p_val_raw, y_val)
     p_val_calib = iso.transform(p_val_raw)
-    
-    # 5. Predict on Test
-    p_test_raw = model.predict_proba(X_test, iteration_range=(0, best_iteration + 1))[:, 1]
-    p_test_calib = iso.transform(p_test_raw)
-    
-    # 6. Session Aggregation on Test
-    test_res = pd.DataFrame({
-        "capture_id": test_groups,
-        "label": y_test,
-        "prob": p_test_calib
-    })
-    
-    # 7. Compute Block Recall at FPR=0.01 on Test
-    session_df = test_res.groupby("capture_id").agg({
-        "prob": "mean",
-        "label": "max"
-    }).reset_index()
 
-    y_true = session_df["label"].values
-    y_prob = session_df["prob"].values
+    # 5. Predict on Val and Evaluate Objective
+    val_res = pd.DataFrame({
+        "capture_id": val_groups,
+        "label": y_val,
+        "prob": p_val_calib
+    })
+
+    # 6. Compute block recall at FPR=0.01 on Val
+    score = compute_firewall_score(val_res)
     
-    benign_mask = (y_true == 0)
-    vpn_mask = (y_true == 1)
-    benign_probs = y_prob[benign_mask]
-    vpn_probs = y_prob[vpn_mask]
-    
-    if len(benign_probs) == 0 or len(vpn_probs) == 0:
-        return 0.0
-    
-    # Threshold at FPR=0.01
-    benign_sorted = np.sort(benign_probs)[::-1]
-    n_allowed = int(len(benign_probs) * 0.01)
-    if n_allowed == 0:
-        threshold = benign_sorted[0] + 1e-6 if len(benign_sorted) > 0 else 1.0
-    else:
-        threshold = benign_sorted[n_allowed - 1]
-    
-    # Recall at this threshold
-    preds = (y_prob >= threshold).astype(int)
-    tp = np.sum((preds == 1) & (y_true == 1))
-    recall = tp / len(vpn_probs) if len(vpn_probs) > 0 else 0.0
-    
-    return recall
+    return score
 
 def run_optimization(train_datasets: list, test_dataset: str, n_trials=1000):
     paths = load_paths()
@@ -137,7 +106,6 @@ def run_optimization(train_datasets: list, test_dataset: str, n_trials=1000):
     # 3. Prepare LOOD Splits
     train_df = df_transformed[(df_transformed["split"] == "train") & (df_transformed["dataset"].isin(train_datasets))]
     val_df = df_transformed[(df_transformed["split"] == "val") & (df_transformed["dataset"].isin(train_datasets))]
-    test_df = df_transformed[(df_transformed["split"] == "test") & (df_transformed["dataset"] == test_dataset)]
 
     X_train = train_df[feature_cols].values
     y_train = train_df["label"].values
@@ -145,29 +113,69 @@ def run_optimization(train_datasets: list, test_dataset: str, n_trials=1000):
     X_val = val_df[feature_cols].values
     y_val = val_df["label"].values
     val_groups = val_df["capture_id"].values # For session aggregation
-    
-    X_test = test_df[feature_cols].values
-    y_test = test_df["label"].values
-    test_groups = test_df["capture_id"].values # For session aggregation
-    
+
     logger.info(f"LOOD Train datasets: {train_datasets}, Test dataset: {test_dataset}")
-    logger.info(f"Train shape: {X_train.shape}, Val shape: {X_val.shape}, Test shape: {X_test.shape}")
+    logger.info(f"Train shape: {X_train.shape}, Val shape: {X_val.shape}")
 
     # 4. Run Optuna
     logger.info(f"Starting Optuna optimization ({n_trials} trials)...")
     study = optuna.create_study(direction="maximize")
     
     study.optimize(
-        lambda trial: objective(trial, X_train, y_train, X_val, y_val, val_groups, X_test, y_test, test_groups),
+        lambda trial: objective(trial, X_train, y_train, X_val, y_val, val_groups),
         n_trials=n_trials
     )
     
     logger.info("Optimization finished.")
-    logger.info(f"Best trial score: {study.best_value}")
+    logger.info(f"Best trial val score: {study.best_value}")
     logger.info("Best params:")
     for k, v in study.best_params.items():
         logger.info(f"  {k}: {v}")
-        
+
+    # After tuning, evaluate on TEST using the best parameters
+    logger.info("Evaluating best model on holdout test set...")
+
+    best_params = study.best_params
+    best_params["objective"] = "binary:logistic"
+    best_params["eval_metric"] = "logloss"
+    best_params["booster"] = "gbtree"
+    best_params["tree_method"] = "hist"
+    best_params["n_estimators"] = 1000
+    best_params["random_state"] = 42
+    best_params["n_jobs"] = 1
+
+    best_model = xgb.XGBClassifier(**best_params)
+    best_model.fit(
+        X_train,
+        y_train,
+        eval_set=[(X_val, y_val)],
+        early_stopping_rounds=500,
+        verbose=False
+    )
+
+    best_iteration = best_model.best_iteration
+    p_val_raw = best_model.predict_proba(X_val, iteration_range=(0, best_iteration + 1))[:, 1]
+
+    iso = IsotonicRegression(out_of_bounds="clip")
+    iso.fit(p_val_raw, y_val)
+
+    test_df = df_transformed[(df_transformed["split"] == "test") & (df_transformed["dataset"] == test_dataset)]
+    X_test = test_df[feature_cols].values
+    y_test = test_df["label"].values
+    test_groups = test_df["capture_id"].values
+
+    p_test_raw = best_model.predict_proba(X_test, iteration_range=(0, best_iteration + 1))[:, 1]
+    p_test_calib = iso.transform(p_test_raw)
+
+    test_res = pd.DataFrame({
+        "capture_id": test_groups,
+        "label": y_test,
+        "prob": p_test_calib
+    })
+
+    test_score = compute_firewall_score(test_res)
+    logger.info(f"Final TEST Firewall Score: {test_score:.4f}")
+
     # Save best params
     out_path = paths.artifacts_dir / f"optuna_xgboost_LOOD_{'_'.join(train_datasets)}_test_{test_dataset}_best_params.json"
     with open(out_path, "w") as f:

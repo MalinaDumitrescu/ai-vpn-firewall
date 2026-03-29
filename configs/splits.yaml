@@ -20,8 +20,8 @@ flow_ratios:
 # With strict 70/15/15 *per-class* you would only get ~12-13 VPN captures in val/test,
 # so setting 20 is often too aggressive.
 vpn_trainable_flow_min:
-  val: 0 #30 #10
-  test: 0 #30 #10
+  val: 50 #200
+  test: 50 #200
 
 # Ensure val/test aren't tiny in TOTAL trainable mass (helps avoid "empty" val/test)
 # Use ABSOLUTE counts here (integers).
@@ -60,7 +60,7 @@ guardrails:
 
   # keep enough VPN signal in TRAIN, otherwise training is weak
 vpn_trainable_flow_min_train:
-  train: 300 #180
+  train: 180 #300
 
   # avoid unrealistically VPN-dense val/test for threshold tuning
 max_vpn_fraction_trainable:

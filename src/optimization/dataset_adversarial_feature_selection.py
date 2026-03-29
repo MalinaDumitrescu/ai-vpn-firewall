@@ -73,7 +73,7 @@ def get_candidate_features(feature_cols: List[str]) -> List[str]:
 
 
 def run_adversarial_feature_selection(
-    threshold: float = 0.75,
+    threshold: float = 0.69,
     min_features: int = 5,
 ) -> List[str]:
     paths = load_paths()
@@ -173,7 +173,7 @@ def run_adversarial_feature_selection(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--threshold", type=float, default=0.75)
+    parser.add_argument("--threshold", type=float, default=0.69)
     parser.add_argument("--min-features", type=int, default=5)
     args = parser.parse_args()
 

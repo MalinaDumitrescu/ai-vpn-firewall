@@ -1,6 +1,6 @@
 import pandas as pd
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 import numpy as np
 
 from src.utils.paths import load_paths
@@ -11,6 +11,8 @@ from src.splits.io import load_splits
 logger = setup_logger()
 
 USBVPN_METADATA_COLS = ["source_file", "source_capture_id"]
+
+
 
 
 def apply_split_lists(
@@ -142,15 +144,26 @@ def load_and_prepare_data(
     df_all["dataset"] = df_all["dataset"].astype(str)
     df_all["label"] = df_all["label"].astype(int)
 
-    # FIX: Ensure all numeric feature columns are properly typed for XGBoost
-    # XGBoost requires int, float, bool, or category dtypes, not object
-    logger.info("Ensuring numeric dtypes for feature columns...")
+    # Dedup identical flows BEFORE training
+    logger.info("Removing exact duplicate flows across feature columns...")
     
     # Identify feature columns (exclude metadata)
     exclude_cols = {"flow_id", "capture_id", "source_file", "source_capture_id", 
                    "split", "dataset", "label", "app", "connection_str"}
     
     feature_cols = [c for c in df_all.columns if c not in exclude_cols]
+    
+    # Drop duplicates
+    initial_len = len(df_all)
+    df_all = df_all.drop_duplicates(subset=feature_cols, keep="first")
+    final_len = len(df_all)
+    
+    if initial_len > final_len:
+        logger.info(f"Removed {initial_len - final_len} duplicate flows ({(initial_len - final_len) / initial_len * 100:.2f}%)")
+
+    # FIX: Ensure all numeric feature columns are properly typed for XGBoost
+    # XGBoost requires int, float, bool, or category dtypes, not object
+    logger.info("Ensuring numeric dtypes for feature columns...")
     
     for col in feature_cols:
         if df_all[col].dtype == 'object':
@@ -183,4 +196,76 @@ def load_and_prepare_data(
     logger.info(f"Splits: {df_all['split'].value_counts().to_dict()}")
 
     return df_all
+
+
+def remove_cross_split_duplicates(
+    df: pd.DataFrame,
+    feature_cols: list,
+    train_split: str = "train",
+    val_split: str = "val",
+    test_split: str = "test"
+) -> Tuple[pd.DataFrame, int]:
+    """
+    Remove duplicate flows that appear across different splits (train/val/test).
+    
+    This is a POST-SPLIT deduplication that removes test/val samples if they are
+    exact feature matches to training samples. This prevents data leakage from
+    inflating test performance.
+    
+    Args:
+        df: DataFrame with split column and feature columns
+        feature_cols: List of feature column names to use for deduplication
+        train_split: Name of training split (default: "train")
+        val_split: Name of validation split (default: "val")
+        test_split: Name of test split (default: "test")
+    
+    Returns:
+        (df_deduped, num_removed): Deduplicated dataframe and count of removed flows
+    """
+    if "split" not in df.columns:
+        raise ValueError("DataFrame must contain 'split' column")
+    
+    # Get train features as reference
+    train_features = df[df["split"] == train_split][feature_cols].copy()
+    train_features_set = set(map(tuple, train_features.values))
+    
+    initial_len = len(df)
+    df_out = df.copy()
+    
+    # Remove val samples that match train
+    if val_split in df_out["split"].unique():
+        val_mask = df_out["split"] == val_split
+        val_features = df_out[val_mask][feature_cols].copy()
+        val_rows_to_keep = ~val_features.apply(lambda row: tuple(row) in train_features_set, axis=1)
+        
+        val_removed = (~val_rows_to_keep).sum()
+        df_out.loc[val_mask, "row_to_keep"] = val_rows_to_keep
+        
+        if val_removed > 0:
+            logger.info(f"Removed {val_removed} duplicate flows from {val_split} set (matching {train_split})")
+    
+    # Remove test samples that match train
+    if test_split in df_out["split"].unique():
+        test_mask = df_out["split"] == test_split
+        test_features = df_out[test_mask][feature_cols].copy()
+        test_rows_to_keep = ~test_features.apply(lambda row: tuple(row) in train_features_set, axis=1)
+        
+        test_removed = (~test_rows_to_keep).sum()
+        df_out.loc[test_mask, "row_to_keep"] = test_rows_to_keep
+        
+        if test_removed > 0:
+            logger.info(f"Removed {test_removed} duplicate flows from {test_split} set (matching {train_split})")
+    
+    # Keep rows where row_to_keep is True or not set (train and other splits)
+    df_out["row_to_keep"] = df_out.get("row_to_keep", True)
+    df_out = df_out[df_out["row_to_keep"] == True].drop(columns=["row_to_keep"])
+    
+    final_len = len(df_out)
+    removed_count = initial_len - final_len
+    
+    if removed_count > 0:
+        removal_pct = (removed_count / initial_len) * 100
+        logger.info(f"Total cross-split duplicates removed: {removed_count} ({removal_pct:.2f}%)")
+    
+    return df_out, removed_count
 

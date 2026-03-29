@@ -6,6 +6,7 @@ from typing import List, Optional, Dict, Any
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import QuantileTransformer
+from sklearn.metrics import roc_auc_score
 
 from src.pipeline.artifacts import (
     FeatureArtifacts,
@@ -21,7 +22,6 @@ LABEL_COL = "label"
 SPLIT_COL = "split"
 DATASET_COL = "dataset"
 
-# Metadata / forbidden columns: must never enter model features
 FORBIDDEN_COLS = {
     "app",
     "file_names",
@@ -30,26 +30,38 @@ FORBIDDEN_COLS = {
     "source_capture_id",
 }
 
-# Explicit exclusions from model input
 EXCLUDE_FROM_MODEL = {
     "q_min_packets_ok",
     "q_window_complete",
     "sample_weight",
-    "q_packet_count",  # training-window / availability leak
-    "tot_pkt",  # session-length leak
-    "source_file",  # ID leak
-    "source_capture_id"  # ID leak
+    "q_packet_count",
+    "tot_pkt",
+    "source_file",
+    "source_capture_id",
 }
+
+AUDIT_COLS = {
+    "q_packet_count",
+}
+
+# These must already exist in df_features before FeaturePipeline.fit/transform.
+# The pipeline will NOT derive them anymore.
+# Removed duplicate feature: sz_iqr_median_ratio
+COMPACT_FEATURES = [
+    "sz_coef_variation",
+    "sz_p25_median_ratio",
+    "sz_p75_median_ratio",
+    "sz_iqr_norm_median",
+    "dispersion_symmetry",
+    "direction_balance_bytes",
+    "direction_balance_packets",
+]
 
 
 def _ensure_numeric_finite(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Force numeric dtype, replace inf with NaN, fill NaN with 0.0, and validate finite.
-    """
     out = df.copy()
     for c in out.columns:
         out[c] = pd.to_numeric(out[c], errors="coerce")
-
     out = out.replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
     arr = out.to_numpy(dtype=float, copy=False)
@@ -60,23 +72,16 @@ def _ensure_numeric_finite(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _per_capture_normalize(
-        X: pd.DataFrame,
-        capture_ids: pd.Series,
-        scale_cols: List[str],
+    X: pd.DataFrame,
+    capture_ids: pd.Series,
+    scale_cols: List[str],
 ) -> pd.DataFrame:
-    """
-    Per-capture normalization:
-        z = (x - capture_mean) / capture_std
-
-    Notes:
-    - uses capture_id provided separately, so the feature dataframe itself stays clean
-    - std==0 or std==NaN (e.g. singleton capture) is replaced with 1.0
-    - resulting constant-within-capture features become 0.0 after centering
-    """
     out = X.copy()
 
     if len(capture_ids) != len(out):
         raise ValueError("capture_ids length does not match feature matrix length.")
+
+    capture_ids = capture_ids.astype(str)
 
     for c in scale_cols:
         if c not in out.columns:
@@ -94,44 +99,34 @@ def _per_capture_normalize(
 @dataclass
 class FeaturePipeline:
     """
-    Robust feature pipeline for thesis and evaluation use.
-
-    Behavior:
-    - excludes all metadata / forbidden columns
-    - excludes histogram features entirely:
-        h_size_all_*
-        h_iat_all_*
-    - excludes known leakage / fingerprint columns
-    - keeps deterministic feature ordering
-    - applies clip + log1p on heavy-tailed numeric features
-    - applies per-capture normalization: (x - capture_mean) / capture_std
-    - then applies per-dataset QuantileTransformer (rank normalization)
-    - leaves q_* passthrough columns unscaled if any survive
+    Compact-feature pipeline.
 
     Important:
-    - source_capture_id is metadata only and must never become a model feature
-    - per-capture normalization is suitable for offline evaluation, not strict online-first-flow deployment claims
+    - This pipeline does NOT create derived compact features.
+    - All COMPACT_FEATURES must already be present in df_features before fit/transform.
+    - It only selects, cleans, normalizes, scales, and preserves metadata/audit columns.
     """
     feature_cols: Optional[List[str]] = None
     scale_cols: Optional[List[str]] = None
     passthrough_cols: Optional[List[str]] = None
-    scaler: Optional[Dict[str, QuantileTransformer]] = None
+    audit_cols: Optional[List[str]] = None
+    scaler: Optional[QuantileTransformer] = None
     clip_q: Optional[Dict[str, float]] = None
     metadata: Optional[Dict[str, Any]] = None
 
     def fit(
-            self,
-            df_features: pd.DataFrame,
-            fit_provenance: Optional[Dict[str, Any]] = None
+        self,
+        df_features: pd.DataFrame,
+        fit_provenance: Optional[Dict[str, Any]] = None,
     ) -> "FeaturePipeline":
         missing_req = [c for c in (ID_COLS + [LABEL_COL]) if c not in df_features.columns]
         if missing_req:
             raise ValueError(f"Features DF missing required columns: {missing_req}")
 
         cols_to_exclude_from_features = (
-                set(ID_COLS + [LABEL_COL, SPLIT_COL, DATASET_COL])
-                | FORBIDDEN_COLS
-                | EXCLUDE_FROM_MODEL
+            set(ID_COLS + [LABEL_COL, SPLIT_COL, DATASET_COL])
+            | FORBIDDEN_COLS
+            | EXCLUDE_FROM_MODEL
         )
 
         X_potential_features = df_features.drop(
@@ -139,18 +134,15 @@ class FeaturePipeline:
             errors="ignore",
         ).copy()
 
-        feat_cols = list(X_potential_features.columns)
+        missing_compact = [c for c in COMPACT_FEATURES if c not in X_potential_features.columns]
+        if missing_compact:
+            raise ValueError(
+                "FeaturePipeline.fit expected compact features to already exist in df_features. "
+                f"Missing: {missing_compact}"
+            )
 
-        # Remove histogram features entirely
-        feat_cols = [
-            c for c in feat_cols
-            if not (c.startswith("h_size_all_") or c.startswith("h_iat_all_"))
-        ]
+        feat_cols = list(COMPACT_FEATURES)
 
-        if not feat_cols:
-            raise ValueError("No feature columns detected after exclusions.")
-
-        # Safety check against metadata leakage by name
         suspicious = [
             c for c in feat_cols
             if any(x in c.lower() for x in ["capture", "source_file", "source_capture", "dataset", "split"])
@@ -170,10 +162,8 @@ class FeaturePipeline:
         if not scale:
             raise ValueError("No continuous columns to scale. Check feature extraction.")
 
-        heavy_tailed_cols = []
-        for c in scale:
-            if "iat" in c or c.startswith("sz_"):
-                heavy_tailed_cols.append(c)
+        # clip only size-family compact columns
+        heavy_tailed_cols = [c for c in scale if c.startswith("sz_")]
 
         clip_q: Dict[str, float] = {}
         for c in heavy_tailed_cols:
@@ -182,23 +172,25 @@ class FeaturePipeline:
             X_processed[c] = X_processed[c].clip(lower=0.0, upper=q995)
             X_processed[c] = np.log1p(X_processed[c])
 
-        # Apply per-capture normalization before global scaling
         capture_ids = df_features["capture_id"]
         X_processed = _per_capture_normalize(X_processed, capture_ids, scale)
 
-        scalers = {}
-        datasets = df_features[DATASET_COL].unique()
-        for ds in datasets:
-            mask = df_features[DATASET_COL] == ds
-            X_ds = X_processed.loc[mask, scale]
-            qt = QuantileTransformer(output_distribution="uniform", n_quantiles=min(1000, len(X_ds)), random_state=42)
-            qt.fit(X_ds.to_numpy(dtype=float))
-            scalers[ds] = qt
+        X_scale = X_processed[scale].to_numpy(dtype=float)
+        n_quantiles = max(10, min(1000, len(X_scale)))
+        qt = QuantileTransformer(
+            output_distribution="uniform",
+            n_quantiles=n_quantiles,
+            random_state=42,
+        )
+        qt.fit(X_scale)
+
+        audit_cols = [c for c in AUDIT_COLS if c in df_features.columns]
 
         self.feature_cols = feat_cols
         self.scale_cols = scale
         self.passthrough_cols = passthrough
-        self.scaler = scalers
+        self.audit_cols = audit_cols
+        self.scaler = qt
         self.clip_q = clip_q
         self.metadata = fit_provenance or {}
         return self
@@ -208,17 +200,37 @@ class FeaturePipeline:
             raise RuntimeError("Pipeline is not fitted or loaded.")
         return list(self.scale_cols) + list(self.passthrough_cols)
 
+    def evaluate(
+        self,
+        df_features: pd.DataFrame,
+        labels: pd.Series,
+        dataset_names: pd.Series,
+    ) -> Dict[str, float]:
+        X_transformed = self.transform(df_features, strict=False)
+        feature_cols = self.model_feature_names()
+        auc_scores = {}
+
+        for dataset in np.unique(dataset_names):
+            mask = dataset_names == dataset
+            if mask.sum() > 0:
+                y_true = labels[mask]
+                y_scores = X_transformed.loc[mask, feature_cols].mean(axis=1)
+                auc = roc_auc_score(y_true, y_scores)
+                auc_scores[f"{dataset} AUC"] = auc
+
+        return auc_scores
+
     def transform(
-            self,
-            df_features: pd.DataFrame,
-            *,
-            strict: bool = True,
+        self,
+        df_features: pd.DataFrame,
+        *,
+        strict: bool = True,
     ) -> pd.DataFrame:
         if (
-                self.feature_cols is None
-                or self.scale_cols is None
-                or self.passthrough_cols is None
-                or self.scaler is None
+            self.feature_cols is None
+            or self.scale_cols is None
+            or self.passthrough_cols is None
+            or self.scaler is None
         ):
             raise RuntimeError("Pipeline is not fitted. Call fit() first or load() artifacts.")
 
@@ -229,37 +241,24 @@ class FeaturePipeline:
 
         out = df_features[required_cols].copy()
 
-        # Preserve metadata for downstream analysis only when present
         for meta_col in [SPLIT_COL, DATASET_COL]:
             if meta_col in df_features.columns:
                 out[meta_col] = df_features[meta_col].values
 
-        missing_feats = [c for c in self.feature_cols if c not in df_features.columns]
-        if missing_feats and strict:
+        X = df_features.copy()
+
+        # IMPORTANT:
+        # This pipeline does not derive compact features anymore.
+        # They must already exist in the incoming dataframe.
+        missing_feats = [c for c in self.feature_cols if c not in X.columns]
+        if missing_feats:
             raise ValueError(
                 f"Missing {len(missing_feats)} expected feature columns at transform. "
                 f"Examples: {missing_feats[:10]}"
             )
 
-        if strict:
-            allowed = (
-                    set(ID_COLS + [LABEL_COL, SPLIT_COL, DATASET_COL])
-                    | FORBIDDEN_COLS
-                    | EXCLUDE_FROM_MODEL
-                    | set(self.feature_cols)
-            )
-            current = set(df_features.columns)
-            unexpected = current - allowed
-            if unexpected:
-                raise ValueError(
-                    f"Strict mode: Input contains {len(unexpected)} unexpected columns. "
-                    f"Examples: {sorted(list(unexpected))[:10]}"
-                )
-
-        X = df_features.copy()
-        for c in missing_feats:
-            X[c] = 0.0
-
+        # Do not fail just because df_features contains extra raw columns.
+        # We only keep the fitted feature set from this point forward.
         X = X[self.feature_cols].copy()
         X = _ensure_numeric_finite(X)
 
@@ -269,40 +268,50 @@ class FeaturePipeline:
                     X[c] = X[c].clip(lower=0.0, upper=q995)
                     X[c] = np.log1p(X[c])
 
-        # Apply per-capture normalization before global scaling
         capture_ids = df_features["capture_id"]
         X = _per_capture_normalize(X, capture_ids, self.scale_cols)
 
-        Xs = pd.DataFrame(index=df_features.index, columns=self.scale_cols)
-        for ds in self.scaler.keys():
-            mask = df_features[DATASET_COL] == ds
-            if mask.any():
-                X_ds = X.loc[mask, self.scale_cols]
-                scaled_ds = self.scaler[ds].transform(X_ds.to_numpy(dtype=float))
-                Xs.loc[mask] = scaled_ds
+        X_scale = X[self.scale_cols].to_numpy(dtype=float)
+        scaled = self.scaler.transform(X_scale)
+        Xs = pd.DataFrame(
+            scaled,
+            columns=self.scale_cols,
+            index=df_features.index,
+        )
 
         if self.passthrough_cols:
             Xp = X[self.passthrough_cols].copy()
         else:
-            Xp = pd.DataFrame(index=df_features.index)
+            Xp = pd.DataFrame(
+                np.zeros((len(df_features), 0)),
+                columns=[],
+                index=df_features.index,
+            )
 
-        # DEBUG: Ensure all feature columns in final output are numeric
-        final_df = pd.concat([out, Xs, Xp], axis=1)
+        audit_data = []
+        if self.audit_cols:
+            for col in self.audit_cols:
+                if col in df_features.columns:
+                    audit_data.append(df_features[[col]].copy())
 
-        # Check feature columns specifically
+        frames = [out, Xs, Xp]
+        if audit_data:
+            frames.extend(audit_data)
+
+        final_df = pd.concat(frames, axis=1)
+
         for col in self.scale_cols + self.passthrough_cols:
-            if col in final_df.columns and final_df[col].dtype == 'object':
-                print(f"WARNING: Feature column '{col}' has object dtype, converting to numeric")
-                final_df[col] = pd.to_numeric(final_df[col], errors='coerce').fillna(0.0)
+            if col in final_df.columns:
+                final_df[col] = pd.to_numeric(final_df[col], errors="coerce").fillna(0.0)
 
         return final_df
 
     def save(self, art: FeatureArtifacts, *, feature_config_hash: str) -> None:
         if (
-                self.feature_cols is None
-                or self.scale_cols is None
-                or self.passthrough_cols is None
-                or self.scaler is None
+            self.feature_cols is None
+            or self.scale_cols is None
+            or self.passthrough_cols is None
+            or self.scaler is None
         ):
             raise RuntimeError("Cannot save an unfitted pipeline.")
 
@@ -310,6 +319,7 @@ class FeaturePipeline:
             "feature_cols": self.feature_cols,
             "scale_cols": self.scale_cols,
             "passthrough_cols": self.passthrough_cols,
+            "audit_cols": self.audit_cols or [],
             "model_feature_order": self.model_feature_names(),
             "id_cols": ID_COLS,
             "label_col": LABEL_COL,
@@ -317,8 +327,10 @@ class FeaturePipeline:
             "clip_q": self.clip_q,
             "forbidden_cols": sorted(FORBIDDEN_COLS),
             "excluded_from_model": sorted(EXCLUDE_FROM_MODEL),
+            "audit_cols_list": sorted(AUDIT_COLS),
             "histograms_removed": True,
             "per_capture_normalization": True,
+            "derived_features_created_in_pipeline": False,
         }
         save_json(art.feature_columns_json, meta)
         save_pickle(art.scaler_pkl, self.scaler)
@@ -334,6 +346,7 @@ class FeaturePipeline:
                 feature_cols=meta,
                 scale_cols=meta,
                 passthrough_cols=[],
+                audit_cols=[],
                 scaler=scaler,
                 metadata={},
                 clip_q={},
@@ -342,6 +355,7 @@ class FeaturePipeline:
         feature_cols = meta["feature_cols"]
         scale_cols = meta["scale_cols"]
         passthrough_cols = meta.get("passthrough_cols", [])
+        audit_cols = meta.get("audit_cols", [])
         metadata = meta.get("metadata", {})
         clip_q = meta.get("clip_q", {})
 
@@ -355,7 +369,77 @@ class FeaturePipeline:
             feature_cols=feature_cols,
             scale_cols=scale_cols,
             passthrough_cols=passthrough_cols,
+            audit_cols=audit_cols,
             scaler=scaler,
             metadata=metadata,
             clip_q=clip_q,
         )
+
+    @staticmethod
+    def remove_cross_split_duplicates_in_transformed_space(
+        df_transformed: pd.DataFrame,
+        feature_cols: List[str],
+        train_split: str = "train",
+        val_split: str = "val",
+        test_split: str = "test",
+    ) -> tuple[pd.DataFrame, int]:
+        if "split" not in df_transformed.columns:
+            raise ValueError("Transformed dataframe must contain 'split' column")
+
+        if not all(col in df_transformed.columns for col in feature_cols):
+            missing = [c for c in feature_cols if c not in df_transformed.columns]
+            raise ValueError(f"Missing feature columns: {missing}")
+
+        from src.utils.logging import setup_logger
+        logger = setup_logger()
+
+        train_mask = df_transformed["split"] == train_split
+        train_feats = df_transformed[train_mask][feature_cols].copy()
+        train_feats_tuples = set(map(tuple, train_feats.to_numpy()))
+
+        logger.info(f"Created reference set of {len(train_feats_tuples)} unique train feature vectors")
+
+        initial_len = len(df_transformed)
+        df_out = df_transformed.copy()
+
+        rows_to_keep = pd.Series([True] * len(df_out), index=df_out.index)
+        removed_by_split = {}
+
+        if val_split in df_out["split"].unique():
+            val_mask = df_out["split"] == val_split
+            val_feats = df_out[val_mask][feature_cols].copy()
+            val_duplicates = val_feats.apply(lambda row: tuple(row) not in train_feats_tuples, axis=1)
+
+            rows_to_keep.loc[val_mask] = val_duplicates.values
+            val_removed = int((~val_duplicates).sum())
+            removed_by_split[val_split] = val_removed
+
+            if val_removed > 0:
+                logger.info(f"Marked {val_removed} duplicate flows from {val_split} set (matching {train_split})")
+
+        if test_split in df_out["split"].unique():
+            test_mask = df_out["split"] == test_split
+            test_feats = df_out[test_mask][feature_cols].copy()
+            test_duplicates = test_feats.apply(lambda row: tuple(row) not in train_feats_tuples, axis=1)
+
+            rows_to_keep.loc[test_mask] = test_duplicates.values
+            test_removed = int((~test_duplicates).sum())
+            removed_by_split[test_split] = test_removed
+
+            if test_removed > 0:
+                logger.info(f"Marked {test_removed} duplicate flows from {test_split} set (matching {train_split})")
+
+        df_out = df_out[rows_to_keep].copy()
+        final_len = len(df_out)
+        total_removed = initial_len - final_len
+
+        if total_removed > 0:
+            removal_pct = (total_removed / initial_len) * 100
+            logger.warning(
+                f"Cross-split deduplication removed {total_removed} flows ({removal_pct:.2f}%): "
+                f"{removed_by_split}"
+            )
+        else:
+            logger.info("No cross-split duplicates found in transformed feature space")
+
+        return df_out, total_removed

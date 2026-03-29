@@ -13,17 +13,34 @@ def make_iscx_capture_split(
     val_frac: float = 0.15,
     test_frac: float = 0.15,
     seed: int = 42,
-    min_vpn_captures_val: int = 3,
-    min_vpn_captures_test: int = 3,
+    min_vpn_flows_val: int = 200,
+    min_vpn_flows_test: int = 200,
 ) -> Dict[str, List[str]]:
+    """
+    Creates stratified capture-group splits for the ISCX dataset.
+
+    This function ensures that the validation and test sets contain a minimum
+    number of VPN flows, which is crucial for reliable evaluation when VPN
+    samples are rare.
+
+    The splitting strategy is as follows:
+    1.  Separate captures into VPN and non-VPN groups.
+    2.  For VPN captures:
+        a. Shuffle the captures.
+        b. Greedily assign captures to the 'test' set until `min_vpn_flows_test` is met.
+        c. Greedily assign captures to the 'val' set until `min_vpn_flows_val` is met.
+        d. Assign all remaining VPN captures to the 'train' set.
+    3.  For non-VPN captures:
+        a. Split them into train, val, and test sets based on the provided
+           fractions (`train_frac`, `val_frac`, `test_frac`).
+    4.  Combine the respective VPN and non-VPN capture lists for the final splits.
+    5.  Perform sanity checks to ensure no overlap and full coverage.
+    """
     if abs(train_frac + val_frac + test_frac - 1.0) >= 1e-9:
         raise ValueError(
             f"train_frac + val_frac + test_frac must sum to 1.0. "
             f"Got {train_frac} + {val_frac} + {test_frac} = {train_frac + val_frac + test_frac}"
         )
-
-    if min_vpn_captures_val < 0 or min_vpn_captures_test < 0:
-        raise ValueError("min_vpn_captures_val and min_vpn_captures_test must be >= 0")
 
     if not flows_parquet.exists():
         raise FileNotFoundError(f"Missing flows parquet: {flows_parquet}")
@@ -49,21 +66,46 @@ def make_iscx_capture_split(
         .reset_index()
     )
 
-    vpn_caps = cap.loc[cap["label"] == 1, "capture_id"].astype(str).tolist()
-    non_caps = cap.loc[cap["label"] == 0, "capture_id"].astype(str).tolist()
+    vpn_caps_df = cap.loc[cap["label"] == 1, ["capture_id", "n_flows"]].copy()
+    non_caps_df = cap.loc[cap["label"] == 0, ["capture_id", "n_flows"]].copy()
 
-    if not vpn_caps:
+    if vpn_caps_df.empty:
         raise ValueError("No VPN captures found in ISCX flows.")
-    if not non_caps:
+    if non_caps_df.empty:
         raise ValueError("No non-VPN captures found in ISCX flows.")
 
     rng = np.random.default_rng(seed)
-    rng.shuffle(vpn_caps)
-    rng.shuffle(non_caps)
 
+    # Shuffle captures
+    vpn_caps_df = vpn_caps_df.sample(frac=1, random_state=rng)
+    non_caps_list = non_caps_df["capture_id"].astype(str).tolist()
+    rng.shuffle(non_caps_list)
+
+    # --- VPN Capture Splitting (Flow-based) ---
+    vpn_test = []
+    vpn_val = []
+    vpn_caps_list = list(vpn_caps_df.itertuples(index=False, name=None))
+
+    # Greedily assign to test set to meet flow minimum
+    test_flows = 0
+    while test_flows < min_vpn_flows_test and vpn_caps_list:
+        cap_id, n_flows = vpn_caps_list.pop(0)
+        vpn_test.append(str(cap_id))
+        test_flows += n_flows
+
+    # Greedily assign to val set to meet flow minimum
+    val_flows = 0
+    while val_flows < min_vpn_flows_val and vpn_caps_list:
+        cap_id, n_flows = vpn_caps_list.pop(0)
+        vpn_val.append(str(cap_id))
+        val_flows += n_flows
+
+    # Assign the rest to train
+    vpn_train = [str(cap_id) for cap_id, n_flows in vpn_caps_list]
+
+    # --- Non-VPN Capture Splitting (Count-based) ---
     def split_list(items: List[str]) -> tuple[list[str], list[str], list[str]]:
         n = len(items)
-
         n_train = int(round(train_frac * n))
         n_val = int(round(val_frac * n))
         n_test = n - n_train - n_val
@@ -71,7 +113,6 @@ def make_iscx_capture_split(
         if n_test < 0:
             n_test = 0
             n_train = n - n_val - n_test
-
         if n_train + n_val + n_test != n:
             n_train = n - n_val - n_test
 
@@ -80,20 +121,9 @@ def make_iscx_capture_split(
         test = items[n_train + n_val:]
         return train, val, test
 
-    vpn_train, vpn_val, vpn_test = split_list(vpn_caps)
-    non_train, non_val, non_test = split_list(non_caps)
+    non_train, non_val, non_test = split_list(non_caps_list)
 
-    # Guardrails: ensure enough VPN captures in val/test
-    if len(vpn_val) < min_vpn_captures_val and len(vpn_train) > 0:
-        take = min(min_vpn_captures_val - len(vpn_val), len(vpn_train))
-        vpn_val += vpn_train[:take]
-        vpn_train = vpn_train[take:]
-
-    if len(vpn_test) < min_vpn_captures_test and len(vpn_train) > 0:
-        take = min(min_vpn_captures_test - len(vpn_test), len(vpn_train))
-        vpn_test += vpn_train[:take]
-        vpn_train = vpn_train[take:]
-
+    # --- Combine and Finalize ---
     train_ids = sorted(vpn_train + non_train)
     val_ids = sorted(vpn_val + non_val)
     test_ids = sorted(vpn_test + non_test)

@@ -79,6 +79,12 @@ def print_metrics_summary(metrics: Dict[str, Any]) -> None:
     threshold = metrics.get("threshold", 0.5)
     print(f"Global Threshold: {threshold}")
     
+    if "fixed_policy_thresholds" in metrics and metrics["fixed_policy_thresholds"]:
+        fit_split = metrics.get("policy_fit_split", "val")
+        print(f"Policy Thresholds (derived on '{fit_split}' split, applied unchanged to all splits):")
+        for k, v in metrics["fixed_policy_thresholds"].items():
+            print(f"  {k}: {v:.6f}")
+    
     # Handle both "raw" (from evaluate_xgb) and "splits" (from train_xgboost)
     raw_metrics = metrics.get("raw") or metrics.get("splits")
     
@@ -188,6 +194,8 @@ def evaluate_xgb(
     preds.to_parquet(preds_path, index=False)
 
     # --- Policy Threshold Selection ---
+    # Thresholds are derived on the validation split only and applied unchanged to test (and train) splits.
+    # This prevents data leakage by ensuring test performance is evaluated with thresholds tuned on val.
     fixed_thresholds = None
     if policy_fit_split in preds["split"].unique():
         fixed_thresholds = select_policy_thresholds(
