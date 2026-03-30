@@ -1,0 +1,44 @@
+# Threshold configuration for the VPN detection firewall.
+# Computed from the tuned ensemble (balanced_bagging_firewall_tuned_ensemble)
+# on the validation split using isotonic calibration.
+#
+# These thresholds are mode-specific:
+#   STRICT:   block_FPR = 0 guaranteed (threshold = max benign session score)
+#   BALANCED: block_FPR ≤ 0.1% target
+#   RESEARCH: no thresholding (raw probabilities)
+
+strict:
+  description: "Zero block-FPR. p90 session aggregation."
+  aggregation_rule: "p90"
+  calibration_method: "isotonic"
+  target_fpr: 0.0
+  # These values must be re-computed via calibrate_from_validation()
+  # when deployed on a new validation set.
+  block_threshold: null
+  flag_threshold: null
+  source_split: "val"
+
+balanced:
+  description: "Recall-optimized under ≤0.1% FPR."
+  aggregation_rule: "weighted_top5_mean"
+  calibration_method: "isotonic"
+  target_fpr: 0.001
+  block_threshold: null
+  flag_threshold: null
+  source_split: "val"
+
+research:
+  description: "Raw probability output. No thresholding."
+  aggregation_rule: "mean"
+  calibration_method: "isotonic"
+  target_fpr: 1.0
+  block_threshold: 0.5
+  flag_threshold: 0.3
+  source_split: "none"
+
+# Validated deployment result (from experiments):
+# tuned_ensemble_iso + p90 session aggregation
+# block_recall ≈ 0.7059
+# block_fpr = 0
+# flagged_fpr = 0
+
