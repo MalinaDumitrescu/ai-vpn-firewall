@@ -339,6 +339,75 @@ class FirewallBlocker:
         """
         return self._policy.predict_sessions_batch(flow_preds)
 
+    def predict_capture(
+        self,
+        capture_id: str,
+        predictions_csv: Optional[str | Path] = None,
+        predictions_df: Optional[pd.DataFrame] = None,
+        prob_col: str = "prob_iso",
+    ) -> SessionDecision:
+        """
+        Look up a specific capture/session by capture_id in pre-computed
+        predictions and return a firewall decision.
+
+        This is useful for inspecting individual sessions from the
+        evaluation dataset without re-running inference.
+
+        Parameters
+        ----------
+        capture_id : str
+            Session identifier to look up.
+        predictions_csv : str or Path or None
+            Path to predictions CSV. If None, uses default ensemble predictions.
+        predictions_df : pd.DataFrame or None
+            Pre-loaded predictions. Takes priority over CSV path.
+        prob_col : str
+            Probability column name.
+
+        Returns
+        -------
+        SessionDecision
+        """
+        if not self._policy._thresholds_calibrated and self.mode != DeploymentMode.RESEARCH:
+            raise RuntimeError(
+                "Thresholds not calibrated. Call .calibrate_from_validation() first."
+            )
+
+        if predictions_df is None:
+            if predictions_csv is None:
+                predictions_csv = self.artifact_paths.ensemble_dir / "predictions.csv"
+            predictions_df = pd.read_csv(predictions_csv)
+
+        # Resolve prob_col
+        if prob_col not in predictions_df.columns:
+            for alt in ["prob_cal", "prob_raw", "prob"]:
+                if alt in predictions_df.columns:
+                    prob_col = alt
+                    break
+
+        # Filter to the requested capture_id
+        capture_df = predictions_df[predictions_df["capture_id"] == capture_id].copy()
+        if len(capture_df) == 0:
+            from demo_firewall.errors import InsufficientDataError
+            raise InsufficientDataError(
+                f"No flows found for capture_id='{capture_id}'. "
+                f"Available capture_ids: {sorted(predictions_df['capture_id'].unique()[:10])}"
+            )
+
+        # Rename to standard column for policy engine
+        capture_df = capture_df.rename(columns={prob_col: "prob_cal"})
+
+        decision = self._policy.predict_session(capture_df)
+
+        logger.info(
+            f"[{decision.capture_id}] Decision: {decision.decision.value} "
+            f"(score={decision.session_score:.4f}, "
+            f"threshold={decision.block_threshold:.4f}, "
+            f"flows={decision.n_flows})"
+        )
+
+        return decision
+
     def predict_packet_stream(
         self,
         packets: Iterator[Dict[str, Any]],

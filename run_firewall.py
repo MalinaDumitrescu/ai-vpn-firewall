@@ -65,7 +65,7 @@ def cmd_evaluate(args):
     # Domain separability warning
     warn = blocker.domain_separability_warning()
     if warn:
-        print(f"  ⚠ {warn}\n")
+        print(f"  WARNING: {warn}\n")
 
     # Evaluate
     metrics = blocker.evaluate_dataset(
