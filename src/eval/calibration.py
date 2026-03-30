@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, Literal, Optional, Sequence
 import datetime
 
 import numpy as np
@@ -32,6 +32,13 @@ class ProbabilityCalibrator:
     def fit(self, p_raw: np.ndarray, y: np.ndarray) -> "ProbabilityCalibrator":
         p_raw = _safe_probs(np.asarray(p_raw, dtype=float).reshape(-1))
         y = np.asarray(y, dtype=int).reshape(-1)
+
+        classes = np.unique(y)
+        if classes.size < 2:
+            raise ValueError(
+                "Calibration requires at least 2 classes, "
+                f"but got only {classes.tolist()}"
+            )
 
         if self.method == "platt":
             lr = LogisticRegression(solver="lbfgs")
@@ -97,6 +104,7 @@ def fit_calibrator_from_df(
     split_col: str = "split",
     fit_split: str = "val",
     method: CalibMethod = "platt",
+    fallback_splits: Optional[Sequence[str]] = ("train",),
 ) -> ProbabilityCalibrator:
     import pandas as pd
 
@@ -108,19 +116,75 @@ def fit_calibrator_from_df(
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
 
-    g = df[df[split_col].astype(str) == str(fit_split)]
-    if len(g) == 0:
-        raise ValueError(f"No rows found for fit_split='{fit_split}'.")
+    split_series = df[split_col].astype(str)
+
+    requested = str(fit_split)
+    candidates = [requested]
+    if fallback_splits:
+        candidates.extend([str(s) for s in fallback_splits if str(s).strip()])
+
+    seen = set()
+    ordered_candidates = []
+    for s in candidates:
+        if s not in seen:
+            ordered_candidates.append(s)
+            seen.add(s)
+
+    def _class_counts(g_df: pd.DataFrame) -> Dict[int, int]:
+        vc = g_df[label_col].astype(int).value_counts()
+        out: Dict[int, int] = {}
+        for k, v in vc.items():
+            out[int(np.asarray(k).item())] = int(v)
+        return out
+
+    chosen_df = None
+    chosen_name = None
+    attempts: Dict[str, Dict[int, int]] = {}
+
+    for s in ordered_candidates:
+        g_try = df.loc[split_series == s]
+        if len(g_try) == 0:
+            attempts[s] = {}
+            continue
+        counts = _class_counts(g_try)
+        attempts[s] = counts
+        if len(counts) >= 2:
+            chosen_df = g_try
+            chosen_name = s
+            break
+
+    if chosen_df is None:
+        union_splits = []
+        for s in ordered_candidates:
+            union_splits.append(s)
+            g_try = df.loc[split_series.isin(union_splits)]
+            if len(g_try) == 0:
+                continue
+            counts = _class_counts(g_try)
+            attempts["+".join(union_splits)] = counts
+            if len(counts) >= 2:
+                chosen_df = g_try
+                chosen_name = "+".join(union_splits)
+                break
+
+    if chosen_df is None:
+        raise ValueError(
+            "Calibration requires at least 2 classes in the fit data, but no candidate split/union "
+            f"met that requirement. Requested='{requested}', attempts={attempts}"
+        )
 
     cal = ProbabilityCalibrator(method=method)
-    cal.fit(g[prob_col].to_numpy(), g[label_col].to_numpy())
-    
-    # Auto-populate some metadata
+    cal.fit(chosen_df[prob_col].to_numpy(), chosen_df[label_col].to_numpy())
+
     cal.metadata = {
-        "fit_split": str(fit_split),
-        "n_samples": len(g),
+        "fit_split_requested": requested,
+        "fit_split_used": chosen_name,
+        "fallback_used": bool(chosen_name != requested),
+        "candidate_splits": ordered_candidates,
+        "n_samples": len(chosen_df),
+        "class_counts": _class_counts(chosen_df),
         "prob_col": prob_col,
-        "method": method
+        "method": method,
     }
 
     return cal

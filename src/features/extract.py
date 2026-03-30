@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
 import hashlib
-import json
 
 import numpy as np
 import pandas as pd
@@ -131,11 +130,29 @@ def extract_features_from_flows(
         feat["sz_p25_median_ratio"] = st_sz_all["p25"] / st_sz_all["median"] if st_sz_all["median"] > 0 else 0.0
         feat["sz_p75_median_ratio"] = st_sz_all["p75"] / st_sz_all["median"] if st_sz_all["median"] > 0 else 0.0
 
-        # 4. Add Direction-Invariant Size Metrics
+        # 4. Add Direction-Invariant Size Metrics (legacy — not used by FeaturePipeline)
         feat["sz_mean_max"] = max(st_sz_up["mean"], st_sz_down["mean"])
         feat["sz_mean_min"] = min(st_sz_up["mean"], st_sz_down["mean"])
         feat["sz_std_max"] = max(st_sz_up["std"], st_sz_down["std"])
         feat["sz_std_min"] = min(st_sz_up["std"], st_sz_down["std"])
+
+        # 5a. Remaining COMPACT_FEATURES (required by FeaturePipeline)
+        _eps = cfg.eps
+        _iqr = st_sz_all["p75"] - st_sz_all["p25"]
+        feat["sz_iqr_norm_median"] = _iqr / (st_sz_all["median"] + _eps)
+
+        _num_sym = st_sz_all["p75"] + st_sz_all["p25"] - (2.0 * st_sz_all["median"])
+        _den_sym = abs(st_sz_all["p75"] - st_sz_all["p25"])
+        _disp = _num_sym / (_den_sym + _eps)
+        feat["dispersion_symmetry"] = float(np.clip(_disp, -1.0, 1.0))
+
+        _bytes_up = float(up_sz.sum()) if up_sz.size > 0 else 0.0
+        _bytes_down = float(down_sz.sum()) if down_sz.size > 0 else 0.0
+        feat["direction_balance_bytes"] = (_bytes_up - _bytes_down) / (_bytes_up + _bytes_down + _eps)
+
+        _pkts_up = float(up_sz.size)
+        _pkts_down = float(down_sz.size)
+        feat["direction_balance_packets"] = (_pkts_up - _pkts_down) / (_pkts_up + _pkts_down + _eps)
 
         # 5. Add Timing stats
         for k in ("mean", "std", "p25", "median", "p75"):

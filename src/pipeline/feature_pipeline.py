@@ -57,6 +57,13 @@ COMPACT_FEATURES = [
     "direction_balance_packets",
 ]
 
+DIRECTION_FEATURES = {
+    "direction_balance_bytes",
+    "direction_balance_packets",
+}
+
+NO_CAPTURE_NORM_FEATURES = set(DIRECTION_FEATURES) | {"dispersion_symmetry"}
+
 
 def _ensure_numeric_finite(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
@@ -158,6 +165,7 @@ class FeaturePipeline:
 
         passthrough = [c for c in feat_cols if c.startswith("q_")]
         scale = [c for c in feat_cols if c not in passthrough]
+        capture_norm_scale = [c for c in scale if c not in NO_CAPTURE_NORM_FEATURES]
 
         if not scale:
             raise ValueError("No continuous columns to scale. Check feature extraction.")
@@ -173,7 +181,7 @@ class FeaturePipeline:
             X_processed[c] = np.log1p(X_processed[c])
 
         capture_ids = df_features["capture_id"]
-        X_processed = _per_capture_normalize(X_processed, capture_ids, scale)
+        X_processed = _per_capture_normalize(X_processed, capture_ids, capture_norm_scale)
 
         X_scale = X_processed[scale].to_numpy(dtype=float)
         n_quantiles = max(10, min(1000, len(X_scale)))
@@ -247,6 +255,37 @@ class FeaturePipeline:
 
         X = df_features.copy()
 
+        # Create / refresh derived compact features from raw columns if possible
+        eps = 1e-12
+
+        if "sz_coef_variation" in self.feature_cols and "sz_std" in X.columns and "sz_mean" in X.columns:
+            X["sz_coef_variation"] = X["sz_std"] / (X["sz_mean"] + eps)
+
+        if "sz_p25_median_ratio" in self.feature_cols and "sz_p25" in X.columns and "sz_median" in X.columns:
+            X["sz_p25_median_ratio"] = X["sz_p25"] / (X["sz_median"] + eps)
+
+        if "sz_p75_median_ratio" in self.feature_cols and "sz_p75" in X.columns and "sz_median" in X.columns:
+            X["sz_p75_median_ratio"] = X["sz_p75"] / (X["sz_median"] + eps)
+
+        if "sz_iqr_norm_median" in self.feature_cols and all(c in X.columns for c in ["sz_p75", "sz_p25", "sz_median"]):
+            X["sz_iqr_norm_median"] = (X["sz_p75"] - X["sz_p25"]) / (X["sz_median"] + eps)
+
+        if "dispersion_symmetry" in self.feature_cols and all(
+                c in X.columns for c in ["sz_p75", "sz_median", "sz_p25"]):
+            num = X["sz_p75"] + X["sz_p25"] - (2.0 * X["sz_median"])
+            den = (X["sz_p75"] - X["sz_p25"]).abs()
+            X["dispersion_symmetry"] = (num / (den + eps)).clip(lower=-1.0, upper=1.0)
+
+        if "direction_balance_bytes" in self.feature_cols and "bytes_up" in X.columns and "bytes_down" in X.columns:
+            up = X["bytes_up"].astype(float)
+            down = X["bytes_down"].astype(float)
+            X["direction_balance_bytes"] = (up - down) / (up + down + eps)
+
+        if "direction_balance_packets" in self.feature_cols and "packets_up" in X.columns and "packets_down" in X.columns:
+            up = X["packets_up"].astype(float)
+            down = X["packets_down"].astype(float)
+            X["direction_balance_packets"] = (up - down) / (up + down + eps)
+
         # IMPORTANT:
         # This pipeline does not derive compact features anymore.
         # They must already exist in the incoming dataframe.
@@ -269,7 +308,8 @@ class FeaturePipeline:
                     X[c] = np.log1p(X[c])
 
         capture_ids = df_features["capture_id"]
-        X = _per_capture_normalize(X, capture_ids, self.scale_cols)
+        capture_norm_scale = [c for c in self.scale_cols if c not in NO_CAPTURE_NORM_FEATURES]
+        X = _per_capture_normalize(X, capture_ids, capture_norm_scale)
 
         X_scale = X[self.scale_cols].to_numpy(dtype=float)
         scaled = self.scaler.transform(X_scale)
@@ -330,6 +370,7 @@ class FeaturePipeline:
             "audit_cols_list": sorted(AUDIT_COLS),
             "histograms_removed": True,
             "per_capture_normalization": True,
+            "per_capture_normalization_excluded": sorted(NO_CAPTURE_NORM_FEATURES),
             "derived_features_created_in_pipeline": False,
         }
         save_json(art.feature_columns_json, meta)

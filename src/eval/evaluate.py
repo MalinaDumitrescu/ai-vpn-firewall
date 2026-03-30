@@ -148,6 +148,7 @@ def evaluate_xgb(
     calibrate: bool = False,
     calib_method: str = "platt",
     calib_fit_split: str = "val",
+    calib_fallback_splits: tuple[str, ...] = ("train",),
     calibrator_path: Optional[Path] = None,
     policy_fit_split: str = "val",
 ) -> EvalOutputs:
@@ -185,6 +186,7 @@ def evaluate_xgb(
                 split_col="split",
                 fit_split=calib_fit_split,
                 method=calib_method,  # "platt" or "isotonic"
+                fallback_splits=calib_fallback_splits,
             )
             if calibrator_path is not None:
                 cal.save(calibrator_path)
@@ -269,7 +271,10 @@ def evaluate_xgb(
         metrics["calibration"] = {
             "enabled": True,
             "method": calib_method,
-            "fit_split": calib_fit_split,
+            "fit_split_requested": calib_fit_split,
+            "fit_split_used": (cal.metadata.get("fit_split_used") if cal is not None else calib_fit_split),
+            "fallback_used": (cal.metadata.get("fallback_used") if cal is not None else False),
+            "candidate_splits": list(calib_fallback_splits),
             "calibrator_path": str(calibrator_path.resolve()) if calibrator_path else None,
         }
     else:
@@ -306,6 +311,12 @@ def build_argparser() -> argparse.ArgumentParser:
     ap.add_argument("--calibrate", action="store_true", help="Enable probability calibration")
     ap.add_argument("--calib_method", type=str, default="platt", choices=["platt", "isotonic"])
     ap.add_argument("--calib_fit_split", type=str, default="val")
+    ap.add_argument(
+        "--calib_fallback_splits",
+        type=str,
+        default="train",
+        help="Comma-separated fallback splits if calib_fit_split has <2 classes (default: train)",
+    )
     ap.add_argument("--calibrator_path", type=str, default="", help="Path to save/load calibrator.pkl (optional)")
 
     return ap
@@ -315,6 +326,7 @@ def main() -> None:
     args = build_argparser().parse_args()
 
     policy_fprs = tuple(float(x.strip()) for x in args.policy_fprs.split(",") if x.strip())
+    calib_fallback_splits = tuple(x.strip() for x in args.calib_fallback_splits.split(",") if x.strip())
     calibrator_path = Path(args.calibrator_path) if args.calibrator_path.strip() else None
 
     res = evaluate_xgb(
@@ -328,6 +340,7 @@ def main() -> None:
         calibrate=bool(args.calibrate),
         calib_method=str(args.calib_method),
         calib_fit_split=str(args.calib_fit_split),
+        calib_fallback_splits=calib_fallback_splits,
         calibrator_path=calibrator_path,
         policy_fit_split=str(args.policy_fit_split),
     )
