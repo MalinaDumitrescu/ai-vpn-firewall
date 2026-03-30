@@ -13,6 +13,87 @@ logger = setup_logger()
 USBVPN_METADATA_COLS = ["source_file", "source_capture_id"]
 
 
+def _load_pcap_features(
+    flows_path: Path,
+    features_path: Path,
+    train_list: Path,
+    val_list: Path,
+    test_list: Path,
+    cfg,
+    dataset_name: str,
+) -> pd.DataFrame:
+    """
+    Load features.parquet if it already contains all COMPACT_FEATURES + a split column.
+    Otherwise re-extract compact features from the raw flows.parquet, assign splits,
+    and save back to features_path so the next call is fast.
+
+    This is the correct data-loading path for PCAP-based datasets (VNAT, ISCX).
+    Loading flows.parquet directly is WRONG because its timestamps/sizes/directions
+    columns are raw packet arrays — they become all-zeros after numeric coercion,
+    which makes every VNAT/ISCX flow look identical to the model (guaranteed overfitting).
+    """
+    from src.pipeline.feature_pipeline import COMPACT_FEATURES
+    from src.features.extract import extract_features_from_flows
+
+    # ── Fast path: valid features.parquet ────────────────────────────────────
+    if features_path.exists():
+        df = pd.read_parquet(features_path)
+        missing = [c for c in COMPACT_FEATURES if c not in df.columns]
+        if not missing:
+            if "split" in df.columns:
+                logger.info(
+                    f"[{dataset_name}] Loaded features.parquet "
+                    f"({len(df)} flows, splits already assigned)"
+                )
+                return df
+            # Has features but no split column — apply splits and return
+            logger.info(
+                f"[{dataset_name}] features.parquet has COMPACT_FEATURES but "
+                f"no split column — assigning splits now."
+            )
+            df = apply_split_lists(df, train_list, val_list, test_list)
+            df.to_parquet(features_path, index=False)
+            return df
+        logger.warning(
+            f"[{dataset_name}] features.parquet is stale (missing {missing}). "
+            f"Re-extracting from flows.parquet."
+        )
+
+    # ── Slow path: extract from raw flows ────────────────────────────────────
+    if not flows_path.exists():
+        raise FileNotFoundError(
+            f"[{dataset_name}] Missing both features.parquet and flows.parquet. "
+            f"Expected flows at: {flows_path}"
+        )
+
+    logger.info(f"[{dataset_name}] Extracting compact features from flows.parquet ...")
+    raw_flows = pd.read_parquet(flows_path)
+    df_feats = extract_features_from_flows(raw_flows, cfg)
+
+    # Merge back any metadata columns present in raw flows (app, connection_str, etc.)
+    _skip = {"timestamps", "sizes", "directions",
+             "capture_name", "row_id", "flow_key", "file_names",
+             "packet_count", "packet_count_full", "min_packets_ok"}
+    meta_cols = [
+        c for c in raw_flows.columns
+        if c not in df_feats.columns and c not in _skip
+    ]
+    if "flow_id" in raw_flows.columns and "flow_id" in df_feats.columns:
+        raw_idx = raw_flows.set_index("flow_id")
+        for col in meta_cols:
+            if col in raw_idx.columns:
+                df_feats[col] = df_feats["flow_id"].map(raw_idx[col])
+
+    # Assign splits and cache
+    df_feats = apply_split_lists(df_feats, train_list, val_list, test_list)
+    df_feats.to_parquet(features_path, index=False)
+    logger.info(
+        f"[{dataset_name}] Saved re-extracted features to {features_path} "
+        f"({len(df_feats)} flows)"
+    )
+    return df_feats
+
+
 
 
 def apply_split_lists(
@@ -70,40 +151,44 @@ def load_and_prepare_data(
 
     # --- 1. VNAT ---
     logger.info("Loading VNAT (PCAP-based)...")
-    vnat_path = paths.data_processed_dir / "vnat" / "flows.parquet"
-    if vnat_path.exists():
-        vnat_flows = pd.read_parquet(vnat_path)
-        vnat_feats = vnat_flows.copy()
-        vnat_feats["dataset"] = "vnat"
-        vnat_feats = apply_split_lists(
-            vnat_feats,
-            paths.data_splits / "vnat_train_captures.txt",
-            paths.data_splits / "vnat_val_captures.txt",
-            paths.data_splits / "vnat_test_captures.txt",
+    vnat_flows_path = paths.data_processed_dir / "vnat" / "flows.parquet"
+    vnat_features_path = paths.data_processed_dir / "vnat" / "features.parquet"
+    if vnat_flows_path.exists() or vnat_features_path.exists():
+        vnat_feats = _load_pcap_features(
+            flows_path=vnat_flows_path,
+            features_path=vnat_features_path,
+            train_list=paths.data_splits / "vnat_train_captures.txt",
+            val_list=paths.data_splits / "vnat_val_captures.txt",
+            test_list=paths.data_splits / "vnat_test_captures.txt",
+            cfg=cfg,
+            dataset_name="VNAT",
         )
+        vnat_feats["dataset"] = "vnat"
         all_dfs.append(vnat_feats)
     else:
-        logger.warning(f"VNAT not found at {vnat_path}")
+        logger.warning(f"VNAT not found at {vnat_flows_path}")
 
     if vnat_only:
         return all_dfs[0] if all_dfs else pd.DataFrame()
 
     # --- 2. ISCX ---
     logger.info("Loading ISCX (PCAP-based)...")
-    iscx_path = paths.data_processed_dir / "iscx" / "flows.parquet"
-    if iscx_path.exists():
-        iscx_flows = pd.read_parquet(iscx_path)
-        iscx_feats = iscx_flows.copy()
-        iscx_feats["dataset"] = "iscx"
-        iscx_feats = apply_split_lists(
-            iscx_feats,
-            paths.data_splits / "iscx_train_captures.txt",
-            paths.data_splits / "iscx_val_captures.txt",
-            paths.data_splits / "iscx_test_captures.txt",
+    iscx_flows_path = paths.data_processed_dir / "iscx" / "flows.parquet"
+    iscx_features_path = paths.data_processed_dir / "iscx" / "features.parquet"
+    if iscx_flows_path.exists() or iscx_features_path.exists():
+        iscx_feats = _load_pcap_features(
+            flows_path=iscx_flows_path,
+            features_path=iscx_features_path,
+            train_list=paths.data_splits / "iscx_train_captures.txt",
+            val_list=paths.data_splits / "iscx_val_captures.txt",
+            test_list=paths.data_splits / "iscx_test_captures.txt",
+            cfg=cfg,
+            dataset_name="ISCX",
         )
+        iscx_feats["dataset"] = "iscx"
         all_dfs.append(iscx_feats)
     else:
-        logger.warning(f"ISCX not found at {iscx_path}")
+        logger.warning(f"ISCX not found at {iscx_flows_path}")
 
     # --- 3. USBVPN ---
     logger.info("Loading USBVPN (JSON-based)...")
@@ -138,7 +223,7 @@ def load_and_prepare_data(
     df_all = pd.concat(all_dfs, ignore_index=True)
 
     if "q_min_packets_ok" in df_all.columns:
-        df_all = df_all[df_all["q_min_packets_ok"] == 1].copy()
+        df_all = df_all[df_all["q_min_packets_ok"].fillna(1) == 1].copy()
 
     df_all["split"] = df_all["split"].astype(str)
     df_all["dataset"] = df_all["dataset"].astype(str)
@@ -153,15 +238,7 @@ def load_and_prepare_data(
     
     feature_cols = [c for c in df_all.columns if c not in exclude_cols]
     
-    # Drop duplicates
-    initial_len = len(df_all)
-    df_all = df_all.drop_duplicates(subset=feature_cols, keep="first")
-    final_len = len(df_all)
-    
-    if initial_len > final_len:
-        logger.info(f"Removed {initial_len - final_len} duplicate flows ({(initial_len - final_len) / initial_len * 100:.2f}%)")
-
-    # FIX: Ensure all numeric feature columns are properly typed for XGBoost
+    # FIX: Ensure all numeric feature columns are properly typed for XGBoost BEFORE deduplication
     # XGBoost requires int, float, bool, or category dtypes, not object
     logger.info("Ensuring numeric dtypes for feature columns...")
     
@@ -188,6 +265,15 @@ def load_and_prepare_data(
             logger.error(f"  {col} sample values: {unique_vals}")
     else:
         logger.info("✓ All feature columns successfully converted to numeric dtypes")
+
+    # Drop duplicates on numeric feature columns only (avoids unhashable type errors)
+    numeric_feature_cols = [c for c in feature_cols if df_all[c].dtype in ['int64', 'int32', 'float32', 'float64']]
+    initial_len = len(df_all)
+    df_all = df_all.drop_duplicates(subset=numeric_feature_cols, keep="first")
+    final_len = len(df_all)
+    
+    if initial_len > final_len:
+        logger.info(f"Removed {initial_len - final_len} duplicate flows ({(initial_len - final_len) / initial_len * 100:.2f}%)")
 
     _validate_no_forbidden_model_metadata(df_all)
 

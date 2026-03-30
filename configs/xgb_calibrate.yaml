@@ -1,4 +1,5 @@
 method: "platt"   # platt | isotonic
+fallback_fit_splits: ["train"]  # used only when val has <2 classes
 
 splits:
   train: "train"

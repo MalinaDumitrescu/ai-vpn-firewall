@@ -54,6 +54,10 @@ def calibrate_xgb_predictions(
 
     splits = cfg.get("splits") or {}
     val_name = str(splits.get("val", "val"))
+    fallback_fit_splits = cfg.get("fallback_fit_splits", ["train"])
+    if fallback_fit_splits is None:
+        fallback_fit_splits = []
+    fallback_fit_splits = [str(s) for s in fallback_fit_splits]
 
     in_cfg = cfg.get("inputs") or {}
     preds_rel = str(in_cfg.get("preds_path", "artifacts/xgb/preds.parquet"))
@@ -101,6 +105,7 @@ def calibrate_xgb_predictions(
         split_col="split",
         fit_split=val_name,
         method=method,
+        fallback_splits=fallback_fit_splits,
     )
 
     # 2. Apply Calibration to All Splits
@@ -120,7 +125,11 @@ def calibrate_xgb_predictions(
     # Add metadata about the calibration run
     metrics["calibration_info"] = {
         "method": method,
-        "fit_split": val_name,
+        "fit_split_requested": val_name,
+        "fit_split_used": calibrator.metadata.get("fit_split_used", val_name),
+        "fallback_used": calibrator.metadata.get("fallback_used", False),
+        "candidate_splits": calibrator.metadata.get("candidate_splits", [val_name]),
+        "class_counts_fit": calibrator.metadata.get("class_counts", {}),
         "n_samples_fit": calibrator.metadata.get("n_samples", 0),
         "calibrator_path": str(calibrator_path),
         "input_prob_col": prob_col,
