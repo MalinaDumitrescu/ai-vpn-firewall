@@ -266,13 +266,10 @@ def load_and_prepare_data(
     else:
         logger.info("✓ All feature columns successfully converted to numeric dtypes")
 
-    # Drop duplicates WITHIN each (dataset, capture, label) group.
-    # Flows from different captures that share identical feature values are
-    # genuinely distinct observations and must NOT be collapsed.
+    # Drop duplicates on numeric feature columns only (avoids unhashable type errors)
     numeric_feature_cols = [c for c in feature_cols if df_all[c].dtype in ['int64', 'int32', 'float32', 'float64']]
-    dedup_subset = ["dataset", "capture_id", "label"] + numeric_feature_cols
     initial_len = len(df_all)
-    df_all = df_all.drop_duplicates(subset=dedup_subset, keep="first")
+    df_all = df_all.drop_duplicates(subset=numeric_feature_cols, keep="first")
     final_len = len(df_all)
     
     if initial_len > final_len:
