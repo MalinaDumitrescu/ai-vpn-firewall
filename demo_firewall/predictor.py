@@ -48,6 +48,7 @@ class EnsemblePredictor:
         artifact_paths: ArtifactPaths,
         family_weights: Optional[Dict[str, float]] = None,
         calibration_method: str = "isotonic",
+        model_backend: str = "ensemble_all",
     ):
         """
         Parameters
@@ -59,15 +60,39 @@ class EnsemblePredictor:
             Default: equal weights (1/3 each).
         calibration_method : str
             "isotonic" (default and recommended), "platt", or "none".
+        model_backend : str
+            Which model families to use for inference.
+            "ensemble_all" (default): all 3 families (9 models).
+            "xgb_only": XGBoost family only (3 models).
+            "lgbm_only": LightGBM family only (3 models).
+            "cat_only": CatBoost family only (3 models).
         """
+        _VALID_BACKENDS = {"ensemble_all", "xgb_only", "lgbm_only", "cat_only"}
+        if model_backend not in _VALID_BACKENDS:
+            raise ValueError(
+                f"Invalid model_backend='{model_backend}'. "
+                f"Must be one of {sorted(_VALID_BACKENDS)}"
+            )
+
         self.artifact_paths = artifact_paths
         self.calibration_method = calibration_method
+        self.model_backend = model_backend
+
+        # Determine active families from backend selection
+        _BACKEND_FAMILIES = {
+            "ensemble_all": list(MODEL_FAMILIES),
+            "xgb_only": ["xgb"],
+            "lgbm_only": ["lgbm"],
+            "cat_only": ["cat"],
+        }
+        self._active_families = _BACKEND_FAMILIES[model_backend]
 
         # Default: equal family weights
         if family_weights is None:
-            family_weights = {f: 1.0 / len(MODEL_FAMILIES) for f in MODEL_FAMILIES}
+            family_weights = {f: 1.0 / len(self._active_families) for f in self._active_families}
         total_w = sum(family_weights.values())
-        self.family_weights = {k: v / total_w for k, v in family_weights.items()}
+        self.family_weights = {k: v / total_w for k, v in family_weights.items()
+                               if k in self._active_families}
 
         # Loaded artifacts (populated by .load())
         self._models: Dict[str, List[Any]] = {}       # {family: [model0, model1, model2]}
@@ -95,6 +120,8 @@ class EnsemblePredictor:
         # Load the 9 models
         model_paths = self.artifact_paths.model_paths
         for family in MODEL_FAMILIES:
+            if family not in self._active_families:
+                continue  # Skip inactive families
             self._models[family] = []
             for bag_path in model_paths[family]:
                 try:
@@ -197,6 +224,8 @@ class EnsemblePredictor:
         # Predict with each family
         family_probs: Dict[str, np.ndarray] = {}
         for family in MODEL_FAMILIES:
+            if family not in self._active_families:
+                continue  # Skip inactive families
             bag_probs = []
             for model in self._models[family]:
                 try:
@@ -287,6 +316,8 @@ class EnsemblePredictor:
         """Return model loading diagnostics."""
         return {
             "loaded": self._loaded,
+            "model_backend": self.model_backend,
+            "active_families": self._active_families,
             "n_families": len(self._models),
             "n_models_total": sum(len(v) for v in self._models.values()),
             "family_weights": self.family_weights,
@@ -295,6 +326,5 @@ class EnsemblePredictor:
             "n_features": len(self._feature_names) if self._feature_names else 0,
             "feature_names": self._feature_names,
         }
-
 
 

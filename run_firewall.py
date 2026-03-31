@@ -58,6 +58,7 @@ def cmd_evaluate(args):
         mode=mode,
         drop_direction_features=args.drop_direction,
         calibration_method=args.calibration,
+        model_backend=getattr(args, 'backend', 'ensemble_all'),
     )
     blocker.load()
     blocker.calibrate_from_validation(prob_col=args.prob_col)
@@ -102,6 +103,7 @@ def cmd_compare(args):
             mode=mode,
             drop_direction_features=args.drop_direction,
             calibration_method=args.calibration,
+            model_backend=getattr(args, 'backend', 'ensemble_all'),
         )
         blocker.load()
 
@@ -162,6 +164,7 @@ def cmd_predict(args):
         mode=mode,
         drop_direction_features=args.drop_direction,
         calibration_method=args.calibration,
+        model_backend=getattr(args, 'backend', 'ensemble_all'),
     )
     blocker.load()
     blocker.calibrate_from_validation(prob_col=args.prob_col)
@@ -204,6 +207,7 @@ def cmd_info(args):
         mode=DeploymentMode(args.mode),
         drop_direction_features=args.drop_direction,
         calibration_method=args.calibration,
+        model_backend=getattr(args, 'backend', 'ensemble_all'),
     )
     blocker.load()
 
@@ -267,6 +271,7 @@ def cmd_per_dataset(args):
         mode=mode,
         drop_direction_features=args.drop_direction,
         calibration_method=args.calibration,
+        model_backend=getattr(args, 'backend', 'ensemble_all'),
     )
     blocker.load()
     blocker.calibrate_from_validation(prob_col=args.prob_col)
@@ -351,6 +356,8 @@ def main():
                         help="Remove direction_balance features (domain-robust mode)")
         p.add_argument("--calibration", choices=["isotonic", "platt", "none"],
                         default="isotonic", help="Calibration method (default: isotonic)")
+        p.add_argument("--backend", choices=["ensemble_all", "xgb_only", "lgbm_only", "cat_only"],
+                        default="ensemble_all", help="Model backend (default: ensemble_all)")
         p.add_argument("--prob-col", default="prob_iso",
                         help="Probability column in predictions CSV (default: prob_iso)")
         p.add_argument("--test-split", default="test",

@@ -71,6 +71,7 @@ class FirewallBlocker:
         drop_direction_features: bool = False,
         family_weights: Optional[Dict[str, float]] = None,
         calibration_method: str = "isotonic",
+        model_backend: str = "ensemble_all",
         min_packets: int = 10,
         window_n: int = 100,
     ):
@@ -93,12 +94,19 @@ class FirewallBlocker:
             Custom weights for model families.
         calibration_method : str
             "isotonic" (recommended), "platt", or "none".
+        model_backend : str
+            Which model families to use.
+            "ensemble_all" (default): 3xXGB + 3xLGBM + 3xCat (9 models).
+            "xgb_only": XGBoost family only (3 models).
+            "lgbm_only": LightGBM family only (3 models).
+            "cat_only": CatBoost family only (3 models).
         min_packets : int
             Minimum packets per flow.
         window_n : int
             Maximum packets per flow window.
         """
         self.mode = mode
+        self.model_backend = model_backend
         self.drop_direction_features = drop_direction_features
         self.min_packets = min_packets
         self.window_n = window_n
@@ -118,6 +126,7 @@ class FirewallBlocker:
             artifact_paths=artifact_paths,
             family_weights=family_weights,
             calibration_method=calibration_method,
+            model_backend=model_backend,
         )
         self._policy = FirewallPolicy(
             mode=mode,
@@ -558,6 +567,7 @@ class FirewallBlocker:
         return {
             "loaded": self._loaded,
             "mode": self.mode.value,
+            "model_backend": self.model_backend,
             "drop_direction_features": self.drop_direction_features,
             "min_packets": self.min_packets,
             "window_n": self.window_n,
@@ -570,13 +580,13 @@ class FirewallBlocker:
         Check and warn about domain fingerprinting.
 
         Returns a warning string if direction features are included
-        (which enable dataset-identity separability with AUC ≈ 1.0).
+        (which enable dataset-identity separability with AUC ~= 1.0).
         """
         if not self.drop_direction_features:
             return (
                 "WARNING: Domain separability detected. "
                 "direction_balance_bytes and direction_balance_packets "
-                "enable dataset-identity classification with AUC ≈ 1.0. "
+                "enable dataset-identity classification with AUC ~= 1.0. "
                 "Set drop_direction_features=True for domain-robust inference, "
                 "or acknowledge this limitation for pooled-domain deployment."
             )
