@@ -95,18 +95,14 @@ class FirewallBlocker:
         calibration_method : str
             "isotonic" (recommended), "platt", or "none".
         model_backend : str
-            Which model families to use.
-            "ensemble_all" (default): 3xXGB + 3xLGBM + 3xCat (9 models).
-            "xgb_only": XGBoost family only (3 models).
-            "lgbm_only": LightGBM family only (3 models).
-            "cat_only": CatBoost family only (3 models).
+            Which model families to use: "ensemble_all", "xgb_only",
+            "lgbm_only", or "cat_only".
         min_packets : int
             Minimum packets per flow.
         window_n : int
             Maximum packets per flow window.
         """
         self.mode = mode
-        self.model_backend = model_backend
         self.drop_direction_features = drop_direction_features
         self.min_packets = min_packets
         self.window_n = window_n
@@ -348,75 +344,6 @@ class FirewallBlocker:
         """
         return self._policy.predict_sessions_batch(flow_preds)
 
-    def predict_capture(
-        self,
-        capture_id: str,
-        predictions_csv: Optional[str | Path] = None,
-        predictions_df: Optional[pd.DataFrame] = None,
-        prob_col: str = "prob_iso",
-    ) -> SessionDecision:
-        """
-        Look up a specific capture/session by capture_id in pre-computed
-        predictions and return a firewall decision.
-
-        This is useful for inspecting individual sessions from the
-        evaluation dataset without re-running inference.
-
-        Parameters
-        ----------
-        capture_id : str
-            Session identifier to look up.
-        predictions_csv : str or Path or None
-            Path to predictions CSV. If None, uses default ensemble predictions.
-        predictions_df : pd.DataFrame or None
-            Pre-loaded predictions. Takes priority over CSV path.
-        prob_col : str
-            Probability column name.
-
-        Returns
-        -------
-        SessionDecision
-        """
-        if not self._policy._thresholds_calibrated and self.mode != DeploymentMode.RESEARCH:
-            raise RuntimeError(
-                "Thresholds not calibrated. Call .calibrate_from_validation() first."
-            )
-
-        if predictions_df is None:
-            if predictions_csv is None:
-                predictions_csv = self.artifact_paths.ensemble_dir / "predictions.csv"
-            predictions_df = pd.read_csv(predictions_csv)
-
-        # Resolve prob_col
-        if prob_col not in predictions_df.columns:
-            for alt in ["prob_cal", "prob_raw", "prob"]:
-                if alt in predictions_df.columns:
-                    prob_col = alt
-                    break
-
-        # Filter to the requested capture_id
-        capture_df = predictions_df[predictions_df["capture_id"] == capture_id].copy()
-        if len(capture_df) == 0:
-            from demo_firewall.errors import InsufficientDataError
-            raise InsufficientDataError(
-                f"No flows found for capture_id='{capture_id}'. "
-                f"Available capture_ids: {sorted(predictions_df['capture_id'].unique()[:10])}"
-            )
-
-        # Rename to standard column for policy engine
-        capture_df = capture_df.rename(columns={prob_col: "prob_cal"})
-
-        decision = self._policy.predict_session(capture_df)
-
-        logger.info(
-            f"[{decision.capture_id}] Decision: {decision.decision.value} "
-            f"(score={decision.session_score:.4f}, "
-            f"threshold={decision.block_threshold:.4f}, "
-            f"flows={decision.n_flows})"
-        )
-
-        return decision
-
     def predict_packet_stream(
         self,
         packets: Iterator[Dict[str, Any]],
@@ -448,6 +375,60 @@ class FirewallBlocker:
 
         flow_preds = self._predictor.predict_flow(df_features)
         return self._policy.predict_session(flow_preds)
+
+    def predict_capture(
+        self,
+        capture_id: str,
+        predictions_csv: Optional[str | Path] = None,
+        predictions_df: Optional[pd.DataFrame] = None,
+        prob_col: str = "prob_iso",
+    ) -> SessionDecision:
+        """
+        Look up a specific capture/session from stored predictions and return
+        its firewall decision.
+
+        Parameters
+        ----------
+        capture_id : str
+            The capture identifier to look up.
+        predictions_csv : str or Path or None
+            Path to predictions CSV. Uses default ensemble predictions if None.
+        predictions_df : pd.DataFrame or None
+            Pre-loaded predictions. Takes priority over path.
+        prob_col : str
+            Probability column to use.
+
+        Returns
+        -------
+        SessionDecision
+        """
+        self._check_ready()
+
+        if predictions_df is None:
+            if predictions_csv is None:
+                predictions_csv = self.artifact_paths.ensemble_dir / "predictions.csv"
+            predictions_df = pd.read_csv(predictions_csv)
+
+        # Filter to the requested capture
+        cap_df = predictions_df[
+            predictions_df["capture_id"].astype(str) == str(capture_id)
+        ].copy()
+
+        if len(cap_df) == 0:
+            raise ValueError(
+                f"Capture '{capture_id}' not found in predictions. "
+                f"Available captures: {sorted(predictions_df['capture_id'].unique()[:10])}"
+            )
+
+        # Map prob_col to prob_cal (the internal name used by policy)
+        if prob_col not in cap_df.columns:
+            for alt in ["prob_cal", "prob_raw", "prob"]:
+                if alt in cap_df.columns:
+                    prob_col = alt
+                    break
+        cap_df = cap_df.rename(columns={prob_col: "prob_cal"})
+
+        return self._policy.predict_session(cap_df)
 
     # ─────────────────────────────────────────────
     # Evaluation
@@ -567,7 +548,6 @@ class FirewallBlocker:
         return {
             "loaded": self._loaded,
             "mode": self.mode.value,
-            "model_backend": self.model_backend,
             "drop_direction_features": self.drop_direction_features,
             "min_packets": self.min_packets,
             "window_n": self.window_n,
@@ -580,13 +560,13 @@ class FirewallBlocker:
         Check and warn about domain fingerprinting.
 
         Returns a warning string if direction features are included
-        (which enable dataset-identity separability with AUC ~= 1.0).
+        (which enable dataset-identity separability with AUC ≈ 1.0).
         """
         if not self.drop_direction_features:
             return (
                 "WARNING: Domain separability detected. "
                 "direction_balance_bytes and direction_balance_packets "
-                "enable dataset-identity classification with AUC ~= 1.0. "
+                "enable dataset-identity classification with AUC ≈ 1.0. "
                 "Set drop_direction_features=True for domain-robust inference, "
                 "or acknowledge this limitation for pooled-domain deployment."
             )
