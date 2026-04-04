@@ -76,22 +76,85 @@ def confusion_at_threshold(y_true: np.ndarray, p: np.ndarray, thr: float) -> Dic
     }
 
 
-def threshold_at_fpr(y_true: np.ndarray, p: np.ndarray, target_fpr: float) -> float:
+def threshold_at_fpr(
+    y_true: np.ndarray,
+    p: np.ndarray,
+    target_fpr: float,
+    *,
+    warn_resolution: bool = True,
+) -> float:
     """
     Determines threshold t such that FPR <= target_fpr on the provided data.
     Uses the quantile of negative scores method.
+
+    When ``warn_resolution`` is True (default) and the target FPR is below
+    the achievable resolution (1 / n_negatives), a ``UserWarning`` is
+    emitted.  The threshold is still computed — callers that intentionally
+    request sub-resolution FPR targets can silence the warning.
     """
     y_true = _to_numpy_1d(y_true).astype(int)
     p = _safe_probs(_to_numpy_1d(p).astype(float))
-    
+
     neg_scores = p[y_true == 0]
     if neg_scores.size == 0:
         return 1.000001
-        
+
+    n_neg = len(neg_scores)
+    fpr_resolution = 1.0 / n_neg
+
+    if warn_resolution and 0 < target_fpr < fpr_resolution:
+        import warnings
+        warnings.warn(
+            f"target_fpr={target_fpr} is below achievable resolution "
+            f"1/{n_neg}={fpr_resolution:.4f}. Threshold will be identical "
+            f"to target_fpr=0. Consider using target_fpr >= {fpr_resolution:.4f}.",
+            UserWarning,
+            stacklevel=2,
+        )
+
     # We want the threshold such that only target_fpr fraction of negatives are >= threshold.
     # This is the (1 - target_fpr) quantile.
     t = np.quantile(neg_scores, 1.0 - target_fpr)
     return float(t)
+
+
+def threshold_at_fpr_robust(
+    y_true: np.ndarray,
+    p: np.ndarray,
+    target_fpr: float,
+) -> tuple:
+    """
+    Like :func:`threshold_at_fpr` but also returns resolution metadata.
+
+    Returns
+    -------
+    (threshold, metadata) : tuple[float, dict]
+        ``metadata`` contains ``n_negatives``, ``n_unique_scores``,
+        ``fpr_resolution``, ``target_achievable``, and
+        ``implied_false_positives``.
+    """
+    y_true = _to_numpy_1d(y_true).astype(int)
+    p = _safe_probs(_to_numpy_1d(p).astype(float))
+
+    neg_scores = p[y_true == 0]
+    n_neg = len(neg_scores)
+    n_unique = int(len(np.unique(neg_scores))) if n_neg > 0 else 0
+    fpr_resolution = 1.0 / max(n_neg, 1)
+
+    if neg_scores.size == 0:
+        thr = 1.000001
+    else:
+        thr = float(np.quantile(neg_scores, 1.0 - target_fpr))
+
+    meta = {
+        "n_negatives": n_neg,
+        "n_unique_scores": n_unique,
+        "fpr_resolution": fpr_resolution,
+        "target_fpr": target_fpr,
+        "target_achievable": target_fpr >= fpr_resolution or target_fpr == 0.0,
+        "implied_false_positives": int(round(target_fpr * n_neg)),
+    }
+    return thr, meta
 
 
 def pick_threshold_for_fpr(

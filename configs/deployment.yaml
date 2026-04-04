@@ -1,0 +1,164 @@
+# configs/deployment.yaml
+# Deployment policy configuration for VPN firewall
+# ================================================
+# All thresholds are derived from validation data — never test.
+# See notebooks/33-38 for threshold provenance.
+
+# Named deployment strategies
+strategies:
+  strict_block:
+    description: "Zero-FPR automatic blocking. For enterprise firewalls."
+    aggregation: p90
+    calibration: prob_raw
+    normalization: passthrough
+    block_threshold: 0.9697
+    flag_threshold: 0.90
+    adaptive: false
+    recalibrate: false
+    drift_escalation: true
+    drift_tighten_factor: 0.8
+    target_block_fpr: 0.0
+    target_recall: 0.75
+
+  balanced_block:
+    description: "Recommended production mode. High recall, low FPR."
+    aggregation: wt5
+    calibration: prob_iso
+    normalization: passthrough
+    block_threshold: 0.7447
+    flag_threshold: 0.4977
+    adaptive: false
+    recalibrate: false
+    drift_escalation: true
+    drift_tighten_factor: 0.85
+    target_block_fpr: 0.01
+    target_recall: 0.90
+
+  flag_review:
+    description: "Two-tier: auto-BLOCK confident VPN + FLAG borderline for review."
+    aggregation: wt5
+    calibration: prob_iso
+    normalization: passthrough
+    block_threshold: 0.7447
+    flag_threshold: 0.4977
+    adaptive: false
+    recalibrate: false
+    drift_escalation: false
+
+  unknown_env_adaptive:
+    description: "Context-aware. Starts strict, adapts from benign buffer."
+    aggregation: wt5
+    calibration: prob_iso
+    normalization: passthrough
+    block_threshold: 0.7447
+    flag_threshold: 0.4977
+    adaptive: true
+    recalibrate: false
+    drift_escalation: true
+    drift_tighten_factor: 0.8
+
+  conservative_raw:
+    description: "Rank-normalized raw scores. Maximum FPR safety."
+    aggregation: p80
+    calibration: prob_raw
+    normalization: rank_norm
+    block_threshold: 0.9675
+    flag_threshold: 0.90
+    adaptive: false
+    recalibrate: false
+    drift_escalation: false
+
+  local_recalibration:
+    description: "Locally recalibrated thresholds from benign operator samples."
+    aggregation: wt5
+    calibration: prob_iso
+    normalization: passthrough
+    block_threshold: 0.7447
+    flag_threshold: 0.4977
+    adaptive: false
+    recalibrate: true
+    min_recal_samples: 30
+    drift_escalation: true
+    drift_tighten_factor: 0.85
+
+# Context presets — map environment labels to strategies
+context_presets:
+  enterprise_strict: strict_block
+  balanced_security: balanced_block
+  high_recall_lab: flag_review
+  unknown_environment: unknown_env_adaptive
+  locally_calibrated: local_recalibration
+
+# Deployment switching logic
+switching:
+  min_benign_for_balanced: 50
+  min_benign_for_recalibration: 30
+  max_consecutive_drift_warnings: 3
+  initial_strategy: strict_block
+
+# Drift detection thresholds
+drift_detection:
+  ks_warning_pvalue: 0.05
+  ks_high_pvalue: 0.001
+  psi_warning: 0.10
+  psi_high: 0.25
+  n_bins_psi: 10
+
+# Drift-reactive escalation
+drift_escalation:
+  enabled: true
+  tighten_factor: 0.8
+
+# Adaptive threshold parameters
+adaptive:
+  buffer_size: 200
+  safety_margin: 0.02
+  adaptation_rate: 0.1
+  allow_relaxation: false
+
+# Local recalibration
+recalibration:
+  min_samples: 30
+  caution_threshold: 50
+  acceptable_threshold: 100
+  safety_margin: 0.01
+  flag_fpr_target: 0.05
+
+# Enhanced drift monitoring (Part F)
+enhanced_drift:
+  window_size: 20
+  feature_ks_warning: 0.15
+  feature_ks_high: 0.30
+  critical_feature_pct: 0.50
+  check_interval_sessions: 50
+
+# Safe recalibration (Part G)
+safe_recalibration:
+  max_shift_abs: 0.20
+  max_shift_pct: 0.30
+  min_samples: 30
+  high_confidence_samples: 100
+  moderate_confidence_samples: 50
+  safety_margin: 0.01
+  holdout_fraction: 0.2
+  blend_steps: 3
+
+# Improved engine (Part H)
+improved_engine:
+  auto_switch: true
+  drift_check_interval: 50
+  max_event_log: 1000
+  max_latency_buffer: 500
+  warm_up_decisions: 10
+
+# Artifact paths (relative to project root)
+artifacts:
+  normalizer: artifacts/deployment/normalizer.json
+  drift_monitor: artifacts/deployment/drift_monitor.json
+  adaptive_threshold: artifacts/deployment/adaptive_threshold.json
+  recalibrator: artifacts/deployment/recalibrator.json
+  engine_config: artifacts/deployment/engine_config.json
+  enhanced_drift_monitor: artifacts/deployment/enhanced_drift_monitor.json
+  safe_recalibrator: artifacts/deployment/safe_recalibrator.json
+  improved_engine_state: artifacts/deployment/improved_engine/
+
