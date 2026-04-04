@@ -1,0 +1,39 @@
+# configs/clean_pipeline.yaml
+# Configuration for the CLEAN cross-dataset feature pipeline.
+#
+# Every feature is computed from the SAME formula on the SAME semantic
+# input (timestamps, sizes, directions) across all three datasets.
+
+data:
+  vnat_h5: "data/raw/vnat/VNAT_Dataframe_release_1.h5"
+  iscx_parquet: "data/processed/iscx/flows.parquet"
+  usbvpn_raw_dir: "data/raw/usbvpn"
+
+window:
+  max_packets: 300      # truncate flow to first N packets
+  min_packets: 3        # drop flows shorter than this
+
+features:
+  # Available families (see src/clean_pipeline/feature_families.py):
+  #   safe_core_10                  — 10 direction-free features
+  #   safe_core_plus_duration       — + duration & rates (15)
+  #   safe_core_plus_temporal       — + temporal derived (21)
+  #   direction_invariant_augmented — + dir-invariant stats (25)
+  #   direction_augmented           — + raw dir features (33, RISKY)
+  family: "direction_invariant_augmented"
+
+splitting:
+  seed: 42
+  train_ratio: 0.70
+  val_ratio: 0.15
+  test_ratio: 0.15
+  min_captures_per_class_per_split: 2
+
+scaling:
+  apply_quantile_scaling: true
+  quantile_n: 1000
+
+output:
+  artifacts_dir: "artifacts/clean_pipeline"
+  splits_dir: "data/splits"
+
