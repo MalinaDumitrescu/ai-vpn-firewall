@@ -354,6 +354,7 @@ def run_clean_pipeline(
         val_ratio=cfg.val_ratio,
         test_ratio=cfg.test_ratio,
         min_captures_per_class_per_split=cfg.min_captures_per_class_per_split,
+        splitter_version=cfg.splitter_version,
     )
     features = make_clean_split(features, split_cfg)
 
@@ -369,6 +370,7 @@ def run_clean_pipeline(
                 "train_ratio": cfg.train_ratio,
                 "val_ratio": cfg.val_ratio,
                 "test_ratio": cfg.test_ratio,
+                "splitter_version": cfg.splitter_version,
             },
         )
 

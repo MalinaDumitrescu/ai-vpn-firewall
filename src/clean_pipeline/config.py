@@ -40,6 +40,7 @@ class CleanPipelineConfig:
     val_ratio: float = 0.15
     test_ratio: float = 0.15
     min_captures_per_class_per_split: int = 2
+    splitter_version: int = 2  # 1 = legacy greedy, 2 = constrained (recommended)
 
     # ── Scaling ──
     apply_quantile_scaling: bool = True
@@ -83,6 +84,7 @@ def load_clean_config(yaml_path: Path) -> CleanPipelineConfig:
         min_captures_per_class_per_split=int(
             splitting.get("min_captures_per_class_per_split", 2)
         ),
+        splitter_version=int(splitting.get("splitter_version", 2)),
         apply_quantile_scaling=bool(scaling.get("apply_quantile_scaling", True)),
         quantile_n=int(scaling.get("quantile_n", 1000)),
     )
