@@ -179,11 +179,12 @@ def _make_clean_split_v1(
                                           "n_captures": n_caps}
             continue
 
+        stable = int(hashlib.sha256(f"{ds}_{lbl}".encode()).hexdigest(), 16) % 10000
         assigns = _assign_captures_greedy(
             group,
             train_r=cfg.train_ratio,
             val_r=cfg.val_ratio,
-            seed=cfg.seed + hash(f"{ds}_{lbl}") % 10000,
+            seed=cfg.seed + stable,
         )
         for split, cids in assigns.items():
             for cid in cids:
@@ -602,7 +603,8 @@ def _make_clean_split_v2(
         group = group.reset_index(drop=True)
 
         feasibility = _v2_check_feasibility(group, ds, lbl, cfg)
-        group_seed = cfg.seed + hash(f"{ds}_{lbl}") % 10000
+        stable = int(hashlib.sha256(f"{ds}_{lbl}".encode()).hexdigest(), 16) % 10000
+        group_seed = cfg.seed + stable
 
         assigns, msgs = _v2_assign_group(group, feasibility, cfg, group_seed)
 
