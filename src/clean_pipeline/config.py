@@ -41,6 +41,7 @@ class CleanPipelineConfig:
     test_ratio: float = 0.15
     min_captures_per_class_per_split: int = 2
     splitter_version: int = 2  # 1 = legacy greedy, 2 = constrained (recommended)
+    fail_on_constraint_violation: bool = True  # NEW: fail pipeline if split constraint violated
 
     # ── Scaling ──
     apply_quantile_scaling: bool = True
@@ -85,6 +86,7 @@ def load_clean_config(yaml_path: Path) -> CleanPipelineConfig:
             splitting.get("min_captures_per_class_per_split", 2)
         ),
         splitter_version=int(splitting.get("splitter_version", 2)),
+        fail_on_constraint_violation=bool(splitting.get("fail_on_constraint_violation", True)),
         apply_quantile_scaling=bool(scaling.get("apply_quantile_scaling", True)),
         quantile_n=int(scaling.get("quantile_n", 1000)),
     )
@@ -111,6 +113,6 @@ def default_config() -> CleanPipelineConfig:
         usbvpn_raw_dir=root / "data" / "raw" / "usbvpn",
         output_dir=root / "artifacts" / "clean_pipeline",
         splits_dir=root / "data" / "splits",
+        fail_on_constraint_violation=True,
     )
-
 
