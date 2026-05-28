@@ -143,9 +143,18 @@ class FlowTracker:
         min_packets: int = DEFAULT_MIN_PACKETS,
         window_n: int = DEFAULT_WINDOW_N,
         inactivity_timeout: float = 120.0,
+        pkt_size_mode: str = "ip",
     ) -> pd.DataFrame:
         """
         One-shot: read a pcap file, build flows, extract features.
+
+        Parameters
+        ----------
+        pkt_size_mode : {"ip", "frame", "payload"}
+            Packet size convention. ``"ip"`` (default) matches the robust9
+            training data (USBVPN/ISCX parquets). Using ``"frame"`` (full
+            L2/Ethernet) inflates every size by ~14 bytes and shifts inputs
+            out-of-distribution → low probabilities → all PASS.
 
         Returns
         -------
@@ -165,11 +174,14 @@ class FlowTracker:
         )
 
         n_packets = 0
-        for pkt in iter_packets(pcap_path):
+        for pkt in iter_packets(pcap_path, size_mode=pkt_size_mode):
             tracker.add_packet(**pkt)
             n_packets += 1
 
-        logger.info(f"Read {n_packets} packets from {pcap_path.name}")
+        logger.info(
+            f"Read {n_packets} packets from {pcap_path.name} "
+            f"(pkt_size_mode={pkt_size_mode})"
+        )
 
         return tracker.finalize()
 
