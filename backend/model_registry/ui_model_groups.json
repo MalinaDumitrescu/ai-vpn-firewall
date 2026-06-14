@@ -1,0 +1,43 @@
+{
+  "generated_utc": "2026-05-29T10:00:00.000000+00:00",
+  "default_firewall_model": "full_canonical_lgbm",
+  "default_firewall_model_display_id": "full_canonical__lgbm",
+  "simulation_only": true,
+  "production_ready": false,
+  "groups": {
+    "main_demo_comparison": [
+      "robust9_firewall",
+      "balanced_bagging_3ds_reference",
+      "balanced_bagging_xgb_baseline",
+      "balanced_bagging_baseline",
+      "robust13_comparison",
+      "balanced_bagging_tuned_baseline"
+    ],
+    "advanced_unsafe_benchmark": [
+      "clean_pooled_benchmark",
+      "single_model_fallback"
+    ],
+    "robustness_negative_control": [
+      "lodo_hold_iscx",
+      "lodo_hold_usbvpn",
+      "lodo_hold_vnat"
+    ],
+    "hidden_alias_or_unsupported": [
+      "balanced_bagging_3ds_refresh",
+      "historical_3ds_degraded",
+      "twentyone_feature_experimental"
+    ],
+    "final_transfer_comparison": [
+      "full_canonical_lgbm",
+      "timing_shape_lgbm",
+      "robust9_firewall",
+      "robust9_clean"
+    ],
+    "dann_research": [
+      "dann_research",
+      "anti_fingerprint_hybrid"
+    ]
+  },
+  "default_model_note": "full_canonical__lgbm (registry key: full_canonical_lgbm) is the recommended simulation prototype from the final_transfer experiment. robust9_firewall is retained as legacy baseline — it is not the recommended model.",
+  "simulation_disclaimer": "No model in this registry performs real packet blocking. All SIMULATED_BLOCK actions are audit/log events only. Not production-ready."
+}

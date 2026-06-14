@@ -1,0 +1,27 @@
+{
+  "model_id": "balanced_bagging_xgb_baseline",
+  "source_artifact": "artifacts/balanced_bagging_xgb",
+  "model_files": {
+    "xgb": [
+      "model_xgb_bag0.pkl",
+      "model_xgb_bag1.pkl",
+      "model_xgb_bag2.pkl"
+    ]
+  },
+  "calibrators": {
+    "isotonic": "isotonic_calibrator.pkl",
+    "platt": "platt_calibrator.pkl"
+  },
+  "ensemble_weights": {
+    "xgb": 1.0
+  },
+  "feature_order_file": "feature_order.json",
+  "probability_column": "prob_raw",
+  "session_grouping_column": "capture_id",
+  "session_aggregation": "wt5",
+  "wt5_source": "src/deployment/decision_engine.py::_wt5_agg",
+  "family_scope": "xgboost_only",
+  "notes": [
+    "Artifact ships only model_xgb_bag*.pkl. Predictions contain p_lgbm_raw/p_cat_raw columns inherited from the shared schema but those families are NOT available for real inference. Loader exposes XGB bags only."
+  ]
+}

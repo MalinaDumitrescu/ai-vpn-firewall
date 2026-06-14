@@ -82,4 +82,3 @@ ax.text(0.7, 0.2, 'Transform val', ha='center', va='center', bbox=dict(boxstyle=
 ax.text(0.7, 0.8, 'Transform test', ha='center', va='center', bbox=dict(boxstyle='round', facecolor='wheat'))
 plt.savefig('figures/validation/preprocessing_fit_transform_protocol.png')
 ```
-

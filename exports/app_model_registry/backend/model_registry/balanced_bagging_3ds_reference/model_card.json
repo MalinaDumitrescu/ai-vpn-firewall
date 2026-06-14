@@ -1,0 +1,44 @@
+{
+  "model_id": "balanced_bagging_3ds_reference",
+  "display_name": "Balanced Bagging 3-DS Ensemble (Reference)",
+  "source_artifact": "artifacts/balanced_bagging_firewall_tuned_ensemble",
+  "created_utc": "2026-05-23T13:08:56.440600+00:00",
+  "role": "reference_candidate",
+  "training": {
+    "retrained_in_packaging": false,
+    "note": "Packaging is read-only; thresholds derived from existing predictions.csv."
+  },
+  "ensemble": {
+    "families": [
+      "xgboost",
+      "lightgbm",
+      "catboost"
+    ],
+    "bags_per_family": 3
+  },
+  "calibrators": {
+    "isotonic": "isotonic_calibrator.pkl",
+    "platt": "platt_calibrator.pkl"
+  },
+  "probability_columns_available": [
+    "prob_raw",
+    "prob_iso",
+    "prob_platt"
+  ],
+  "selected_probability_column": "prob_raw",
+  "selected_aggregation": "wt5",
+  "session_grouping_column": "capture_id",
+  "intended_use": "Reference/comparison candidate for benchmarking against the current default firewall.",
+  "recommended_action_mode": "simulation",
+  "production_readiness": false,
+  "warnings": [
+    "comparison-only, not deployment-approved"
+  ],
+  "ui_group": "main_demo_comparison",
+  "ui_visible_main": true,
+  "ui_selectable_for_comparison": true,
+  "ui_selectable_for_firewall_inference": false,
+  "ui_badge": "Comparison-only",
+  "ui_warning": "Comparison-only, not deployment-approved.",
+  "ui_sort_order": 2
+}

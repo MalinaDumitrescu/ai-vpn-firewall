@@ -1,0 +1,12 @@
+{
+  "isotonic_calibrator_file": "isotonic_calibrator.pkl",
+  "platt_calibrator_file": "platt_calibrator.pkl",
+  "selected_probability_column": "prob_iso",
+  "selection_rationale": "Strict FPR==0 on test preferred, then max strict recall, then max session AUC, then max balanced recall.",
+  "available_probability_columns": [
+    "prob_raw",
+    "prob_iso",
+    "prob_platt"
+  ],
+  "calibration_source_metrics_from_artifact": "artifacts/balanced_bagging_tuned/metrics.json"
+}

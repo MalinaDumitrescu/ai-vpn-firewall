@@ -88,4 +88,3 @@ split_counts = features.groupby(['dataset', 'split', 'label']).size().unstack(fi
 split_counts[['nonVPN', 'VPN']].plot(kind='bar', stacked=True)
 plt.savefig('figures/validation/split_composition_per_dataset.png')
 ```
-

@@ -90,4 +90,3 @@ mat = capture_overlap_matrix(splits)
 fig, ax = plt.subplots(...)
 plt.savefig(out_png, bbox_inches="tight")
 ```
-

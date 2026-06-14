@@ -1,0 +1,36 @@
+{
+  "note": "full_canonical__lgbm (key: full_canonical_lgbm) is the recommended simulation firewall prototype. robust9_firewall is retained as legacy baseline. timing_shape_lgbm is available for diagnostic comparison. No model performs real packet blocking. All actions are simulation-only.",
+  "simulation_only": true,
+  "production_ready": false,
+  "default_firewall": "full_canonical_lgbm",
+  "default_firewall_display_id": "full_canonical__lgbm",
+  "allowlist": [
+    "full_canonical_lgbm",
+    "robust9_firewall",
+    "timing_shape_lgbm",
+    "balanced_bagging_3ds_reference",
+    "balanced_bagging_baseline",
+    "robust13_comparison",
+    "balanced_bagging_xgb_baseline"
+  ],
+  "csv_evaluation_models": [
+    "full_canonical_lgbm",
+    "timing_shape_lgbm",
+    "balanced_bagging_3ds_reference",
+    "balanced_bagging_baseline",
+    "balanced_bagging_xgb_baseline",
+    "robust13_comparison"
+  ],
+  "firewall_inference_models": [
+    "full_canonical_lgbm",
+    "robust9_firewall"
+  ],
+  "firewall_inference_policy": {
+    "full_canonical_lgbm": "open_set_three_tier",
+    "robust9_firewall": "two_tier_strict_legacy"
+  },
+  "open_set_models": [
+    "full_canonical_lgbm"
+  ],
+  "updated_utc": "2026-05-29T10:00:00.000000+00:00"
+}

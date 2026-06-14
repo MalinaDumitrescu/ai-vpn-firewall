@@ -1,0 +1,37 @@
+{
+  "model_id": "full_canonical_lgbm",
+  "policy_type": "open_set_three_tier",
+  "source_split": "val",
+  "simulation_only": true,
+  "open_set_thresholds": {
+    "review_threshold": 0.027090,
+    "review_threshold_basis": "p95 benign session score (val, 100 sessions)",
+    "block_threshold": 0.165365,
+    "block_threshold_basis": "max benign session score (val) — zero block-FPR on val"
+  },
+  "action_mapping": {
+    "PASS": "score < 0.027090",
+    "FLAG_REVIEW": "0.027090 <= score < 0.165365",
+    "SIMULATED_BLOCK": "score >= 0.165365  [SIMULATION ONLY — no real packet blocking]"
+  },
+  "val_three_tier_result": {
+    "n_benign_sessions": 100,
+    "n_vpn_sessions": 1,
+    "benign_PASS": 95,
+    "benign_FLAG_REVIEW": 4,
+    "benign_SIMULATED_BLOCK": 1,
+    "vpn_PASS": 0,
+    "vpn_FLAG_REVIEW": 0,
+    "vpn_SIMULATED_BLOCK": 1,
+    "block_fpr_on_val": 0.01,
+    "review_fpr_on_val": 0.04
+  },
+  "safety_flags": {
+    "strict_unsafe_for_blocking": false,
+    "production_readiness": false,
+    "recommended_action_mode": "simulation",
+    "domain_fingerprinting_resolved": false,
+    "domain_auc": 1.0,
+    "lodo_min_auc": 0.6164
+  }
+}

@@ -1,0 +1,216 @@
+============================================================
+BUILD FRONTEND DEMO CSVs
+============================================================
+Project root     : C:\Users\scoti\PycharmProjects\ai-vpn-firewall
+Output dir       : C:\Users\scoti\PycharmProjects\ai-vpn-firewall\exports\frontend_demo
+Rows per group   : 50
+Random state     : 42
+Allow unknown    : False
+Robust9 source   : notebook
+
+========================================================================
+BUILD NOTEBOOK-CONSISTENT ROBUST9 DEMO CSV
+========================================================================
+  predictions: artifacts\ensemble\diverse_bagging_robust9\predictions.csv
+  output     : exports\frontend_demo\frontend_demo_robust9.csv
+  threshold  : 0.8717948717948718
+  target TP / TN / FN captures: 3 / 3 / 1
+
+  Notebook test split: 9384 flows over 124 captures across datasets=['iscx', 'usbvpn', 'vnat']
+  Per-capture notebook outcomes (test split): {'TN': 102, 'TP': 15, 'FP': 5, 'FN': 2}
+
+  Selected TP VPN captures   (n=3): ['vpn_vpn_hangouts_chat1b.pcap', 'vpn_vpn_ftps_a.pcap', 'vpn_vpn_aim_chat1b.pcap']
+  Selected TN NONVPN captures (n=3): ['nonvpn_sftp_down_3a.pcap', 'nonvpn_sftpdown2.pcap', 'non_streaming__chunk_0447']
+  Selected FN VPN captures   (n=1): ['vpn_vpn_voipbuster1a.pcap']
+  Selected captures by dataset: {'iscx': 6, 'usbvpn': 1}
+
+  Loading feature rows for selected captures …
+  USBVPN: loaded 100 feature rows for 1 captures from flows.parquet (native robust9 — matches notebook training exactly)
+  ISCX: loaded 2071 feature rows for 6 captures from data/processed/iscx/features.parquet (sz_all_* filled 0.0 to match training-time data_preparation)
+  Intersected with notebook test flow_ids: 2171 -> 351 rows
+
+  Written notebook-consistent CSV: C:\Users\scoti\PycharmProjects\ai-vpn-firewall\exports\frontend_demo\frontend_demo_robust9.csv  (351 rows)
+
+  ===== Diagnostics =====
+    row count                : 351
+    capture count            : 7
+    session count            : 7
+    flow label counts        : {'VPN': 238, 'NONVPN': 113}
+    capture label counts     : {'VPN': 4, 'NONVPN': 3}
+    capture_id present       : True
+    mixed-label captures     : 0
+    mixed-label sessions     : 0
+    all-zero feature rows    : 0
+    flows per capture        : {'min': 5, 'median': 58, 'max': 112}
+    selected TP captures     : ['vpn_vpn_hangouts_chat1b.pcap', 'vpn_vpn_ftps_a.pcap', 'vpn_vpn_aim_chat1b.pcap']
+    selected TN captures     : ['nonvpn_sftp_down_3a.pcap', 'nonvpn_sftpdown2.pcap', 'non_streaming__chunk_0447']
+    selected FN captures     : ['vpn_vpn_voipbuster1a.pcap']
+
+  ───── Runtime verification (rescore + p80) ───��─
+    capture_id                               expected runtime  p80_runtime  match
+    non_streaming__chunk_0447                PASS     PASS     0.1500       OK
+    nonvpn_sftp_down_3a.pcap                 PASS     PASS     0.2177       OK
+    nonvpn_sftpdown2.pcap                    PASS     PASS     0.1551       OK
+    vpn_vpn_aim_chat1b.pcap                  BLOCK    PASS     0.2177       MISMATCH
+    vpn_vpn_ftps_a.pcap                      BLOCK    PASS     0.1607       MISMATCH
+    vpn_vpn_hangouts_chat1b.pcap             BLOCK    PASS     0.1394       MISMATCH
+    vpn_vpn_voipbuster1a.pcap                PASS     PASS     0.2177       OK
+    decisions matching notebook: 4 / 7
+
+  Robust9 diagnostics JSON: C:\Users\scoti\PycharmProjects\ai-vpn-firewall\exports\frontend_demo\frontend_demo_robust9_diagnostics.json
+--- A. Data Discovery ---
+Found 59 candidate files across search paths.
+
+--- B. Loading Datasets ---
+
+[USBVPN]
+  USBVPN: loading data\processed\usbvpn\flows.parquet
+  ALIAS: USBVPN: mapped 'sz_coef_variation' -> 'sz_cv'
+         shape (58977, 40)
+
+[ISCX]
+  ISCX: loading primary features from data\processed\iscx\features.parquet
+         shape (76687, 28)
+  ISCX: loading secondary features from artifacts\clean_pipeline_test_iscx\features.parquet
+         shape (11801, 32)
+  ALIAS: ISCX/secondary: mapped 'pkt_len_cv' -> 'sz_cv'
+  ALIAS: ISCX/secondary: mapped 'sz_cv' -> 'sz_coef_variation'
+  ALIAS: ISCX/secondary: mapped 'mean_pkt_len' -> 'sz_all_mean'
+  ALIAS: ISCX/secondary: mapped 'std_pkt_len' -> 'sz_all_std'
+  ALIAS: ISCX/secondary: mapped 'median_pkt_len' -> 'sz_all_median'
+  ALIAS: ISCX/secondary: mapped 'p25_pkt_len' -> 'sz_all_p25'
+  ALIAS: ISCX/secondary: mapped 'p75_pkt_len' -> 'sz_all_p75'
+  ALIAS: ISCX/secondary: mapped 'iat_mean' -> 'iat_all_mean'
+  ALIAS: ISCX/secondary: mapped 'iat_std' -> 'iat_all_std'
+  ALIAS: ISCX/secondary: mapped 'iat_median' -> 'iat_all_median'
+  ALIAS: ISCX/secondary: mapped 'iat_p25' -> 'iat_all_p25'
+  ALIAS: ISCX/secondary: mapped 'iat_p75' -> 'iat_all_p75'
+  ISCX join result: 11801 rows (inner join on flow_id)
+  ALIAS: ISCX/merged: mapped 'sz_coef_variation' -> 'sz_cv'
+
+[VNAT]
+  VNAT: loading data\processed\vnat\features_compact_eval.parquet
+  ALIAS: VNAT: mapped 'sz_coef_variation' -> 'sz_cv'
+         shape (33711, 16)
+
+--- C. Session Feature Enrichment ---
+  Loading predictions for session enrichment: artifacts\balanced_bagging_firewall_tuned_ensemble_3dataset_REFRESH\predictions.csv
+
+--- D. Building Multimodel DataFrames ---
+Total rows loaded: 104489
+
+  [usbvpn] shape=(58977, 46)
+  Deduplicated: removed 2349 duplicate rows.
+  [usbvpn/VPN] multimodel rows: 8480
+  [usbvpn/NONVPN] multimodel rows: 48148
+  Deduplicated: removed 18045 duplicate rows.
+  [usbvpn/VPN] robust9 rows: 6854
+  [usbvpn/NONVPN] robust9 rows: 34078
+
+  [iscx] shape=(11801, 41)
+  Deduplicated: removed 12 duplicate rows.
+  [iscx/VPN] multimodel rows: 2942
+  [iscx/NONVPN] multimodel rows: 8847
+  Deduplicated: removed 6891 duplicate rows.
+  [iscx/VPN] robust9 rows: 1561
+  [iscx/NONVPN] robust9 rows: 3349
+
+  [vnat] shape=(33711, 22)
+  [vnat] Multimodel: filled 18 missing cols with 0.0: ['iat_all_mean', 'iat_all_median', 'iat_all_p25', 'iat_all_p75', 'iat_all_std', 'iat_mean_max', 'iat_mean_min', 'iat_std_max', 'iat_std_min', 'sz_all_mean', 'sz_all_median', 'sz_all_p25', 'sz_all_p75', 'sz_all_std', 'sz_mean_max', 'sz_mean_min', 'sz_std_max', 'sz_std_min']
+  Dropped 77 rows with NaN in required features.
+  Deduplicated: removed 30329 duplicate rows.
+  [vnat/VPN] multimodel rows: 17
+  [vnat/NONVPN] multimodel rows: 3288
+  [vnat] Cannot provide robust9 rows — missing: ['sz_all_mean', 'sz_all_p25', 'sz_all_median', 'sz_all_p75', 'sz_mean_max', 'sz_mean_min', 'sz_std_max', 'sz_std_min']
+
+--- E. Diversity Sampling ---
+
+Sampling robust9 CSV (target 50 per group):
+
+Sampling multimodel CSV (target 50 per group):
+  WARN: vnat/VPN — only 17 rows available (target 50). Using all.
+
+--- F/G. Exporting CSVs ---
+  Skipping legacy robust9 write — notebook-consistent CSV already at C:\Users\scoti\PycharmProjects\ai-vpn-firewall\exports\frontend_demo\frontend_demo_robust9.csv
+  Written: C:\Users\scoti\PycharmProjects\ai-vpn-firewall\exports\frontend_demo\frontend_demo_multimodel.csv  (267 rows)
+
+============================================================
+FINAL REPORT
+============================================================
+Files scanned : 59
+Files used    : 4
+Files skipped : 55
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\eval_v3\clean_lodo_results.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\eval_v3\clean_policy_grid.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\eval_v3\domain_weighted_lodo.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\eval_v3\ensemble_mean_results.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\eval_v3\family_policy_grids.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\eval_v3\family_search_leaderboard.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\eval_v3\family_search_lodo_details.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\eval_v3\family_search_results.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\eval_v3\feature_stability_rank.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\eval_v3\final_candidate_table.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\eval_v3\lodo_summary.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\eval_v3\logistic_stacking_lodo.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\eval_v3\logistic_stacking_results.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\eval_v3\majority_voting_lodo.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\eval_v3\majority_voting_results.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\eval_v3\repeated_split_metrics.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\eval_v3\repeated_split_summary.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\eval_v3\threshold_adaptation_results.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\eval_v3\usbvpn_split_stability_report.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\eval_v3\xgb_results.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\evaluation_v2\clean_lodo_results.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\evaluation_v2\clean_policy_grid.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\evaluation_v2\clean_split_audit.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\evaluation_v2\clean_vs_legacy_comparison.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\evaluation_v2\models\test_predictions.parquet: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\evaluation_v2\models\val_predictions.parquet: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\features.parquet: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\features_test.parquet: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\features_train.parquet: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\features_val.parquet: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\flows\merged_flows_meta.parquet: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\models\test_predictions.parquet: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\models\val_predictions.parquet: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\models_3ds_66k\predictions.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\threshold_rule_comparison.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\threshold_stability_per_seed.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline\threshold_stability_summary.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline_test_iscx\features_test.parquet: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline_test_iscx\features_train.parquet: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline_test_iscx\features_val.parquet: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\artifacts\clean_pipeline_test_iscx\flows\merged_flows_meta.parquet: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\data\benign_personas\cloud_backup\features.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\data\benign_personas\enterprise_proxy\features.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\data\benign_personas\gaming_udp\features.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\data\benign_personas\https_browsing\features.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\data\benign_personas\rdp\features.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\data\benign_personas\streaming\features.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\data\benign_personas\video_call\features.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\data\processed\iscx\flows.parquet: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\data\processed\vnat\features.parquet: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\data\processed\vnat\features_compact_eval_trainable.parquet: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\data\processed\vnat\features_trainable.parquet: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\data\processed\vnat\flows.parquet: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\exports\app_runtime_bundle\demo_data\demo_flows.csv: not a primary feature source or superseded
+  SKIP C:\Users\scoti\PycharmProjects\ai-vpn-firewall\exports\app_runtime_bundle\demo_data\demo_multimodel_flows.csv: not a primary feature source or superseded
+Rows before cleaning  : 104489
+Rows after cleaning   : 71722
+Output rows [robust9]  : 351
+Output rows [multimodel]  : 267
+
+Class distribution by dataset:
+  robust9: [{'dataset': 'iscx', 'label': 'NONVPN', 'count': 19}, {'dataset': 'iscx', 'label': 'VPN', 'count': 238}, {'dataset': 'usbvpn', 'label': 'NONVPN', 'count': 94}]
+  multimodel: [{'dataset': 'iscx', 'label': 'NONVPN', 'count': 50}, {'dataset': 'iscx', 'label': 'VPN', 'count': 50}, {'dataset': 'usbvpn', 'label': 'NONVPN', 'count': 50}, {'dataset': 'usbvpn', 'label': 'VPN', 'count': 50}, {'dataset': 'vnat', 'label': 'NONVPN', 'count': 50}, {'dataset': 'vnat', 'label': 'VPN', 'count': 17}]
+
+Missing columns filled with 0.0 (multimodel):
+  vnat: ['iat_all_mean', 'iat_all_median', 'iat_all_p25', 'iat_all_p75', 'iat_all_std', 'iat_mean_max', 'iat_mean_min', 'iat_std_max', 'iat_std_min', 'sz_all_mean', 'sz_all_median', 'sz_all_p25', 'sz_all_p75', 'sz_all_std', 'sz_mean_max', 'sz_mean_min', 'sz_std_max', 'sz_std_min']
+
+Final column lists:
+  [robust9]: ['capture_id', 'session_id', 'flow_id', 'dataset', 'label', 'sz_all_mean', 'sz_cv', 'sz_all_p25', 'sz_all_median', 'sz_all_p75', 'sz_mean_max', 'sz_mean_min', 'sz_std_max', 'sz_std_min']
+  [multimodel]: ['session_id', 'flow_id', 'dataset', 'label', 'direction_balance_bytes', 'direction_balance_packets', 'dispersion_symmetry', 'iat_all_mean', 'iat_all_median', 'iat_all_p25', 'iat_all_p75', 'iat_all_std', 'iat_mean_max', 'iat_mean_min', 'iat_std_max', 'iat_std_min', 'session_consecutive_high_runs', 'session_fraction_high', 'session_mean_prob', 'session_top_k_mean_prob', 'session_var_prob', 'sz_all_mean', 'sz_all_median', 'sz_all_p25', 'sz_all_p75', 'sz_all_std', 'sz_coef_variation', 'sz_cv', 'sz_iqr_norm_median', 'sz_mean_max', 'sz_mean_min', 'sz_p25_median_ratio', 'sz_p75_median_ratio', 'sz_std_max', 'sz_std_min']
+
+Created files:
+  robust9_csv: C:\Users\scoti\PycharmProjects\ai-vpn-firewall\exports\frontend_demo\frontend_demo_robust9.csv
+  multimodel_csv: C:\Users\scoti\PycharmProjects\ai-vpn-firewall\exports\frontend_demo\frontend_demo_multimodel.csv

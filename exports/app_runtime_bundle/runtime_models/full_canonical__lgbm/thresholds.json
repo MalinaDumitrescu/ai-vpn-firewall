@@ -1,0 +1,65 @@
+{
+  "model_id": "full_canonical__lgbm",
+  "policy": "open_set_three_tier",
+  "action_mode": "simulation",
+  "simulation_only": true,
+  "production_ready": false,
+
+  "probability_column": "prob",
+  "aggregation_strategy": "mean_per_capture",
+  "aggregation_note": "Session score = mean of per-flow calibrated probabilities (prob) within each capture.",
+
+  "source_split": "val",
+  "source_file": "artifacts/final_transfer/models/full_canonical__lgbm/val_predictions.csv",
+  "threshold_selection_method": "quantile_on_benign_val_sessions",
+  "threshold_selection_description": "review_threshold = p95 of benign session scores on val split; block_threshold = max benign session score (zero benign-block-FPR on val). Validation data only — no test-set contamination.",
+
+  "review_threshold": 0.027090,
+  "block_threshold": 0.165365,
+  "review_threshold_basis": "p95 benign session score (val)",
+  "block_threshold_basis": "max benign session score (zero block-FPR on val)",
+
+  "target_review_fpr": 0.05,
+  "target_block_fpr": 0.0,
+  "achieved_review_fpr_on_val": 0.04,
+  "achieved_block_fpr_on_val": 0.01,
+
+  "threshold_bands": {
+    "PASS":              "score < 0.027090",
+    "FLAG_REVIEW":       "0.027090 <= score < 0.165365",
+    "SIMULATED_BLOCK":   "score >= 0.165365"
+  },
+
+  "explanation_templates": {
+    "PASS":             "Score below review threshold (score < 0.027090). Traffic pattern consistent with benign baseline.",
+    "FLAG_REVIEW":      "Score is in the uncertainty band (0.027090 \u2264 score < 0.165365). Elevated but not definitively VPN. Manual review recommended.",
+    "SIMULATED_BLOCK":  "Score exceeds block threshold (score \u2265 0.165365). High-confidence VPN detection. [SIMULATED BLOCK \u2014 no real packet blocking. Simulation-only prototype.]"
+  },
+
+  "val_stats": {
+    "n_benign_sessions": 100,
+    "n_vpn_sessions": 1,
+    "benign_p90_score": 0.004187,
+    "benign_p95_score": 0.027090,
+    "benign_p99_score": 0.160252,
+    "benign_max_score": 0.165365,
+    "vpn_min_score": 0.95797
+  },
+
+  "val_three_tier_result": {
+    "benign_PASS": 95,
+    "benign_FLAG_REVIEW": 4,
+    "benign_SIMULATED_BLOCK": 1,
+    "vpn_PASS": 0,
+    "vpn_FLAG_REVIEW": 0,
+    "vpn_SIMULATED_BLOCK": 1,
+    "block_fpr_on_val": 0.01,
+    "review_fpr_on_val": 0.04
+  },
+
+  "domain_shift_rationale": "Under domain shift, unknown-domain flows produce elevated but uncertain scores in the [review_threshold, block_threshold] band. FLAG_REVIEW routes these for human inspection instead of automatic binary BLOCK, reducing risky decisions in uncertain regions.",
+
+  "disclaimer": "SIMULATION ONLY. No real packets are blocked. All SIMULATED_BLOCK decisions are audit/log actions. This prototype is not production-ready (domain_auc=1.0, structural fingerprinting unresolved).",
+
+  "note": "Thresholds derived from val split only (100 benign + 1 VPN sessions). Should be recomputed if a richer validation set becomes available."
+}

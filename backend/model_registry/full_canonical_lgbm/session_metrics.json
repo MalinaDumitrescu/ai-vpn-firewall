@@ -1,0 +1,14 @@
+{
+  "model_id": "full_canonical_lgbm",
+  "n_val_sessions": 101,
+  "pooled_auc": 0.9994,
+  "session_auc_val": 1.0,
+  "lodo_iscx_auc": 0.6164,
+  "lodo_vnat_auc": 0.6898,
+  "lodo_mean_auc": 0.6531,
+  "lodo_min_auc": 0.6164,
+  "domain_auc": 1.0,
+  "ece": 0.0026,
+  "recall_at_threshold": 0.9444,
+  "fpr_at_threshold": 0.0025
+}

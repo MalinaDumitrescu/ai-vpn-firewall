@@ -1,0 +1,65 @@
+{
+  "model_id": "clean_pooled_benchmark",
+  "selected_combination": {
+    "probability_column": "ensemble_score",
+    "aggregation": "p80"
+  },
+  "thresholds": {
+    "strict": 0.10278490276532272,
+    "balanced": 0.9508673713594167
+  },
+  "test_metrics": {
+    "n_val_sessions": 16,
+    "n_test_sessions": 91,
+    "session_auc_test": 0.9987562189054726,
+    "per_dataset_session_auc_test": {
+      "iscx": 1.0,
+      "usbvpn": null,
+      "vnat": 1.0
+    },
+    "strict": {
+      "recall": 1.0,
+      "fpr": 0.125,
+      "TP": 67,
+      "FP": 3,
+      "TN": 21,
+      "FN": 0
+    },
+    "balanced": {
+      "recall": 0.7313432835820896,
+      "fpr": 0.0,
+      "TP": 49,
+      "FP": 0,
+      "TN": 24,
+      "FN": 18
+    },
+    "review_load_test": 0.0,
+    "n_block_test": 70,
+    "n_flag_review_test": 0
+  },
+  "leakage_checks": {
+    "has_split_col": true,
+    "flow_overlap_train_val": 0,
+    "flow_overlap_train_test": 0,
+    "flow_overlap_val_test": 0,
+    "capture_overlap_train_val": 0,
+    "capture_overlap_train_test": 0,
+    "capture_overlap_val_test": 0
+  },
+  "any_overlap_detected": false,
+  "action_mapping_examples": {
+    "strict_true_balanced_true": "BLOCK",
+    "strict_false_balanced_true": "FLAG_REVIEW",
+    "strict_false_balanced_false": "PASS"
+  },
+  "safety_flags": {
+    "strict_unsafe_for_blocking": true,
+    "balanced_review_only": false,
+    "production_readiness": false,
+    "recommended_action_mode": "simulation"
+  },
+  "warnings": [
+    "comparison-only, not deployment-approved"
+  ],
+  "all_combinations_csv": "reports/tables/clean_pooled_benchmark_policy_packaging_check.csv"
+}

@@ -1,0 +1,53 @@
+{
+  "generated_utc": "2026-05-28T22:04:33.103285+00:00",
+  "default_firewall": "full_canonical__lgbm",
+  "allowlist": {
+    "full_canonical__lgbm": {
+      "runtime_binary_exported": true,
+      "role": "recommended_firewall",
+      "inference_permitted": true,
+      "action_mode": "simulation"
+    },
+    "robust9_firewall": {
+      "runtime_binary_exported": true,
+      "role": "legacy_baseline",
+      "inference_permitted": true,
+      "action_mode": "simulation"
+    },
+    "balanced_bagging_3ds_reference": {
+      "runtime_binary_exported": true,
+      "role": "benchmark_comparison",
+      "inference_permitted": true,
+      "action_mode": "simulation"
+    },
+    "balanced_bagging_xgb_baseline": {
+      "runtime_binary_exported": true,
+      "role": "benchmark_comparison",
+      "inference_permitted": true,
+      "action_mode": "simulation"
+    },
+    "balanced_bagging_baseline": {
+      "runtime_binary_exported": true,
+      "role": "benchmark_comparison",
+      "inference_permitted": true,
+      "action_mode": "simulation"
+    },
+    "robust13_comparison": {
+      "runtime_binary_exported": true,
+      "role": "benchmark_comparison",
+      "inference_permitted": true,
+      "action_mode": "simulation"
+    }
+  },
+  "blocked": {
+    "lodo_hold_iscx": "negative_control \u2014 not deployable",
+    "lodo_hold_usbvpn": "negative_control \u2014 not deployable",
+    "lodo_hold_vnat": "negative_control \u2014 not deployable",
+    "clean_pooled_benchmark": "nonzero strict FPR \u2014 blocking disabled",
+    "single_model_fallback": "nonzero strict FPR \u2014 blocking disabled",
+    "balanced_bagging_3ds_refresh": "alias only",
+    "historical_3ds_degraded": "historical/degraded alias",
+    "twentyone_feature_experimental": "unsupported \u2014 no recoverable artifact",
+    "balanced_bagging_tuned_baseline": "metadata only \u2014 no runtime binary"
+  }
+}

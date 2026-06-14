@@ -1,0 +1,8 @@
+{
+  "alias_id": "balanced_bagging_3ds_refresh",
+  "target_model_id": "balanced_bagging_3ds_reference",
+  "reason": "Source artifact is byte-identical to balanced_bagging_firewall_tuned_ensemble (verified by SHA-256 over all files).",
+  "source_artifact": "artifacts/balanced_bagging_firewall_tuned_ensemble_3dataset_REFRESH",
+  "created_utc": "2026-05-23T13:08:56.440600+00:00",
+  "note": "Source artifact is byte-identical to the target. No duplicate package is produced."
+}

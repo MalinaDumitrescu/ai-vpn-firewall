@@ -1,0 +1,51 @@
+{
+  "model_id": "lodo_hold_usbvpn",
+  "display_name": "LODO Hold-USBVPN (negative control)",
+  "source_artifact": "artifacts/lood_firewall_tuned/hold_usbvpn",
+  "created_utc": "2026-05-23T13:12:53.305464+00:00",
+  "role": "negative_control",
+  "held_out_dataset": "usbvpn",
+  "holdout_isolated_in_test_split": true,
+  "training": {
+    "retrained_in_packaging": false,
+    "note": "Read-only packaging; the holdout dataset was excluded from training and forms the test split."
+  },
+  "ensemble": {
+    "families": [
+      "xgboost",
+      "lightgbm",
+      "catboost"
+    ],
+    "bags_per_family": 3
+  },
+  "calibrators": {
+    "isotonic": "isotonic_calibrator.pkl",
+    "platt": "platt_calibrator.pkl"
+  },
+  "probability_columns_available": [
+    "prob_raw",
+    "prob_iso",
+    "prob_platt"
+  ],
+  "selected_probability_column": "prob_platt",
+  "selected_aggregation": "wt5",
+  "session_grouping_column": "capture_id",
+  "intended_use": "Cross-dataset robustness / generalization stress-test. NOT a deployable firewall model.",
+  "warnings": [
+    "Negative control / LODO stress-test model. Not deployable."
+  ],
+  "supports_firewall_actions": false,
+  "supports_live_mode": false,
+  "recommended_use": "robustness/stress-test evidence only",
+  "recommended_action_mode": "report_only",
+  "production_readiness": false,
+  "deployable": false,
+  "exposed_to_firewall_mode": false,
+  "ui_group": "robustness_negative_control",
+  "ui_visible_main": false,
+  "ui_selectable_for_comparison": false,
+  "ui_selectable_for_firewall_inference": false,
+  "ui_badge": "LODO negative control",
+  "ui_warning": "Negative control for unseen-domain robustness. Not deployable.",
+  "ui_sort_order": 31
+}

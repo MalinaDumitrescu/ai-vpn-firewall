@@ -4,7 +4,7 @@ Robustness reporting and evaluation metrics.
 
 Generates structured reports for firewall inference results,
 including session-level metrics, calibration diagnostics,
-and provenance metadata.
+provenance metadata, and open-set policy dashboard cards.
 """
 from __future__ import annotations
 
@@ -341,3 +341,201 @@ def save_report(
     return path
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Open-set three-tier dashboard helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ACTION_COLORS = {
+    "PASS": "\033[32m",            # green
+    "FLAG_REVIEW": "\033[33m",     # yellow/orange
+    "SIMULATED_BLOCK": "\033[31m", # red
+    "BLOCK": "\033[31m",
+    "FLAG": "\033[33m",
+    "ALLOW": "\033[32m",
+}
+_RESET = "\033[0m"
+
+
+def render_status_cards(
+    status_cards: List[Dict[str, Any]],
+    use_color: bool = False,
+) -> str:
+    """
+    Render dashboard KPI status cards as a text block.
+
+    Parameters
+    ----------
+    status_cards : list of dicts
+        Produced by OpenSetFirewallPolicy.dashboard_report()["status_cards"].
+    use_color : bool
+        Emit ANSI color codes for terminal rendering.
+
+    Returns
+    -------
+    str
+        Formatted status card block.
+    """
+    lines = ["  ┌─ STATUS CARDS ──────────────────────────────────────────────┐"]
+    for card in status_cards:
+        icon = card.get("icon", "")
+        title = card.get("title", "")
+        value = str(card.get("value", ""))
+        rate = card.get("rate", "")
+        desc = card.get("description", "")
+        color = ""
+        reset = ""
+        if use_color:
+            action_key = card.get("id", "").upper().replace("_CARD", "")
+            color = _ACTION_COLORS.get(action_key, "")
+            reset = _RESET if color else ""
+        lines.append(
+            f"  │  {icon}  {color}{title:30s}{reset}  "
+            f"{value:>10}  ({rate:>7})  {desc}"
+        )
+    lines.append("  └─────────────────────────────────────────────────────────────┘")
+    return "\n".join(lines)
+
+
+def render_events_table(
+    events: List[Dict[str, Any]],
+    max_rows: int = 20,
+    use_color: bool = False,
+) -> str:
+    """
+    Render the recent events table as formatted text.
+
+    Parameters
+    ----------
+    events : list of dicts
+        From OpenSetFirewallPolicy.dashboard_report()["recent_events"].
+    max_rows : int
+        Maximum number of rows to render.
+    use_color : bool
+        Emit ANSI color codes.
+
+    Returns
+    -------
+    str
+    """
+    rows = events[:max_rows]
+    if not rows:
+        return "  (no events)"
+
+    header = (
+        f"  {'Timestamp':19s}  "
+        f"{'Capture':35s}  "
+        f"{'Score':>7}  "
+        f"{'Action':20s}  "
+        f"{'Margin':>7}  "
+        f"{'Flows':>6}  "
+        f"{'Dataset':12s}  "
+        f"{'OK?':>4}"
+    )
+    sep = "  " + "-" * 118
+
+    lines = [
+        "  ┌─ RECENT EVENTS ─────────────────────────────────────────────────┐",
+        header,
+        sep,
+    ]
+    for ev in rows:
+        action = ev.get("action", "")
+        color = ""
+        reset = ""
+        if use_color:
+            color = _ACTION_COLORS.get(action, "")
+            reset = _RESET if color else ""
+
+        correct = ev.get("correct")
+        ok_marker = "✓" if correct is True else ("✗" if correct is False else " ")
+
+        ts = ev.get("timestamp", "")[:19]  # trim to seconds
+        lines.append(
+            f"  {ts:19s}  "
+            f"{ev.get('capture_id', '')[:35]:35s}  "
+            f"{ev.get('score', 0.0):7.4f}  "
+            f"{color}{action:20s}{reset}  "
+            f"{ev.get('confidence_margin', 0.0):7.4f}  "
+            f"{ev.get('n_flows', 0):6d}  "
+            f"{str(ev.get('dataset', ''))[:12]:12s}  "
+            f"{ok_marker:>4}"
+        )
+    lines.append("  └─────────────────────────────────────────────────────────────┘")
+    return "\n".join(lines)
+
+
+def render_open_set_dashboard(
+    report: Dict[str, Any],
+    use_color: bool = False,
+) -> str:
+    """
+    Render a full open-set policy dashboard from a report dict.
+
+    Parameters
+    ----------
+    report : dict
+        Produced by OpenSetFirewallPolicy.dashboard_report().
+    use_color : bool
+        Emit ANSI terminal colours.
+
+    Returns
+    -------
+    str
+    """
+    disclaimer = report.get("disclaimer", "[SIMULATION ONLY]")
+    generated = report.get("generated_at", "")
+    pi = report.get("policy_info", {})
+    m = report.get("metrics", {})
+
+    lines = [
+        "=" * 72,
+        "  VPN FIREWALL — OPEN-SET POLICY DASHBOARD",
+        f"  ⚠  {disclaimer}",
+        f"  Generated: {generated}",
+        "=" * 72,
+        "",
+        render_status_cards(report.get("status_cards", []), use_color=use_color),
+        "",
+        "  ── POLICY CONFIGURATION ─────────────────────────────────────────",
+        f"  Model:               {pi.get('model_id', 'N/A')}",
+        f"  Policy type:         {pi.get('policy_type', 'N/A')}",
+        f"  Source split:        {pi.get('source_split', 'val')}",
+        f"  review_threshold:    {pi.get('review_threshold', 'N/A'):.6f}  ← {pi.get('review_threshold_basis', '')}",
+        f"  block_threshold:     {pi.get('block_threshold', 'N/A'):.6f}  ← {pi.get('block_threshold_basis', '')}",
+        "",
+        "  Action rules:",
+        *[
+            f"    {k:20s}  →  {v}"
+            for k, v in pi.get("actions", {}).items()
+        ],
+        "",
+        "  ── AGGREGATE METRICS ────────────────────────────────────────────",
+        f"  Total sessions:        {m.get('n_sessions', 0)}",
+        f"  ✅  PASS:               {m.get('n_pass', 0)}  ({m.get('pass_rate', 0)*100:.1f}%)",
+        f"    FLAG_REVIEW:        {m.get('n_flag_review', 0)}  ({m.get('flag_rate', 0)*100:.1f}%)",
+        f"    SIMULATED_BLOCK:    {m.get('n_simulated_block', 0)}  ({m.get('block_rate', 0)*100:.1f}%)",
+    ]
+
+    if "vpn_detected_recall" in m:
+        lines += [
+            "",
+            f"  VPN recall (flag+block):  {m['vpn_detected_recall']*100:.1f}%",
+            f"  VPN recall (block only):  {m.get('vpn_block_recall', 0)*100:.1f}%",
+        ]
+    if "benign_block_fpr" in m:
+        lines += [
+            f"  Benign block FPR:         {m['benign_block_fpr']*100:.2f}%",
+            f"  Benign review FPR:        {m.get('benign_review_fpr', 0)*100:.1f}%",
+        ]
+
+    lines += [
+        "",
+        render_events_table(
+            report.get("recent_events", []),
+            max_rows=20,
+            use_color=use_color,
+        ),
+        "",
+        "=" * 72,
+    ]
+    return "\n".join(lines)

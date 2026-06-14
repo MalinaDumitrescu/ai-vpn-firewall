@@ -1,0 +1,20 @@
+{
+  "feature_order": [
+    "sz_coef_variation",
+    "sz_p25_median_ratio",
+    "sz_p75_median_ratio",
+    "sz_mean_max",
+    "sz_mean_min",
+    "sz_std_max",
+    "sz_std_min",
+    "session_mean_prob",
+    "session_var_prob",
+    "session_top_k_mean_prob",
+    "session_consecutive_high_runs",
+    "session_fraction_high"
+  ],
+  "n_features": 12,
+  "recovered_from": "model_cat_bag0.pkl",
+  "method": "model attribute (feature_names_/feature_name_/feature_names_in_/Booster.feature_names)",
+  "feature_count_note": "Artifact name says robust13, but recovered runtime feature order contains 12 features."
+}

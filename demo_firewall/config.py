@@ -63,16 +63,23 @@ class DeploymentMode(str, Enum):
     """
     Deployment operating modes for the firewall classifier.
 
-    STRICT:   Zero block-FPR enforced. p90 session aggregation.
-              Maximum benign threshold. Default for production.
-    BALANCED: Optimize recall under ≤0.1% FPR constraint.
-              Suitable for monitored deployments.
-    RESEARCH: Raw probability output only. No thresholding.
-              For offline analysis and experimentation.
+    STRICT:    Zero block-FPR enforced. p90 session aggregation.
+               Maximum benign threshold. Default for production.
+    BALANCED:  Optimize recall under ≤0.1% FPR constraint.
+               Suitable for monitored deployments.
+    RESEARCH:  Raw probability output only. No thresholding.
+               For offline analysis and experimentation.
+    OPEN_SET:  Three-tier uncertainty-aware policy.
+               PASS / FLAG_REVIEW / SIMULATED_BLOCK.
+               Reduces risky binary decisions under domain shift.
+               review_threshold = p95 benign session score (val).
+               block_threshold  = max benign session score (val).
+               SIMULATED BLOCK only — no real packet blocking.
     """
     STRICT = "strict"
     BALANCED = "balanced"
     RESEARCH = "research"
+    OPEN_SET = "open_set"
 
 
 @dataclass(frozen=True)
@@ -102,6 +109,12 @@ MODE_CONFIGS: Dict[DeploymentMode, ModeConfig] = {
         aggregation_rule="mean",
         enforce_zero_block_fpr=False,
         description="Raw probability output. No thresholding applied.",
+    ),
+    DeploymentMode.OPEN_SET: ModeConfig(
+        target_fpr=0.01,      # Relaxed FPR for open set
+        aggregation_rule="mean",
+        enforce_zero_block_fpr=False,
+        description="Uncertainty-aware mode. PASS/FLAG_REVIEW/SIMULATED_BLOCK.",
     ),
 }
 
@@ -209,5 +222,4 @@ def load_thresholds_yaml(path: Path) -> Dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     return data
-
 

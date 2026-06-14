@@ -1,0 +1,16 @@
+{
+  "model_id": "twentyone_feature_experimental",
+  "display_name": "21-Feature Experimental Detector",
+  "status": "unsupported",
+  "created_utc": "2026-05-23T13:08:56.440600+00:00",
+  "explanation": "No recoverable 21-feature artifact exists in the workspace. Inspected artifacts/clean_pipeline/feature_columns.json (9 features) and artifacts/features/feature_columns.json (7 features). No 21-feature model file, predictions file, or feature manifest was located. Per task constraints, no feature order is invented.",
+  "intended_use": "Listed for completeness; no recoverable artifact exists in the workspace.",
+  "production_readiness": false,
+  "ui_group": "hidden_alias_or_unsupported",
+  "ui_visible_main": false,
+  "ui_selectable_for_comparison": false,
+  "ui_selectable_for_firewall_inference": false,
+  "ui_badge": "Unsupported",
+  "ui_warning": "Unsupported stub; exact deployable artifact/feature order not recovered.",
+  "ui_sort_order": 92
+}

@@ -1,0 +1,28 @@
+# AI-VPN-Firewall Runtime Bundle — Python Dependencies
+# Generated: 2026-05-29
+# Default model: full_canonical__lgbm (LightGBM, single model)
+# Legacy baseline: robust9_firewall (XGB+LGBM+CatBoost ensemble)
+
+# ── Core ML inference ─────────────────────────────────────────────────────
+pandas>=1.5.0
+numpy>=1.21.0
+scikit-learn>=1.1.0
+joblib>=1.1.0
+
+# ── Model-specific ────────────────────────────────────────────────────────
+# full_canonical__lgbm (recommended firewall — required)
+lightgbm>=3.3.0
+
+# robust9_firewall (legacy baseline — required if shipping robust9 binaries)
+xgboost>=1.7.0
+catboost>=1.0.0
+
+# ── Web API / backend ─────────────────────────────────────────────────────
+fastapi>=0.95.0
+uvicorn[standard]>=0.20.0
+pydantic>=2.0.0
+python-multipart>=0.0.6
+
+# ── Optional: calibration / preprocessing (already bundled as .pkl) ───────
+# scipy  # only needed if recalibrating thresholds
+# pyarrow  # only needed if reading .parquet files

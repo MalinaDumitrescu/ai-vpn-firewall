@@ -1,0 +1,55 @@
+{
+  "model_id": "robust13_comparison",
+  "display_name": "Robust13 Comparison Candidate",
+  "source_artifact": "artifacts/ensemble/diverse_bagging_robust13",
+  "created_utc": "2026-05-26T07:57:32.235218+00:00",
+  "role": "reference_candidate",
+  "training": {
+    "retrained_in_packaging": false,
+    "note": "Packaging is read-only; thresholds derived from existing predictions.csv on val and evaluated on test."
+  },
+  "ensemble": {
+    "families": [
+      "xgboost",
+      "lightgbm",
+      "catboost"
+    ],
+    "bags_per_family": 3,
+    "family_scope": "multi_family"
+  },
+  "calibrators": {
+    "isotonic": "isotonic_calibrator.pkl",
+    "platt": "platt_calibrator.pkl"
+  },
+  "feature_order": {
+    "n_features": 12,
+    "recovered_from": "model_cat_bag0.pkl"
+  },
+  "probability_columns_available": [
+    "prob_raw",
+    "prob_iso",
+    "prob_platt"
+  ],
+  "selected_probability_column": "prob_platt",
+  "selected_aggregation": "wt5",
+  "session_grouping_column": "capture_id",
+  "intended_use": "Direct 12/13-feature counterpart to robust9_firewall for comparison only.",
+  "recommended_action_mode": "simulation",
+  "production_readiness": false,
+  "supports_firewall_actions": true,
+  "supports_live_mode": false,
+  "warnings": [
+    "comparison-only, not deployment-approved"
+  ],
+  "feature_count_note": "Artifact name says robust13, but recovered runtime feature order contains 12 features.",
+  "ui_group": "main_demo_comparison",
+  "ui_visible_main": true,
+  "ui_selectable_for_comparison": true,
+  "ui_selectable_for_firewall_inference": false,
+  "ui_badge": "Comparison-only",
+  "ui_warning": "Comparison-only, not deployment-approved.",
+  "ui_sort_order": 5,
+  "ui_selectable_for_csv_evaluation": true,
+  "runtime_binary_exported": true,
+  "updated_utc": "2026-05-26T10:57:14.668704+00:00"
+}

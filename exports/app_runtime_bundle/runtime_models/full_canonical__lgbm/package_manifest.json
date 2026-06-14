@@ -1,0 +1,23 @@
+{
+  "model_id": "full_canonical__lgbm",
+  "created_utc": "2026-05-29T00:00:00.000000+00:00",
+  "status": "deployment_eligible",
+  "role": "recommended_firewall",
+  "source_artifact": "artifacts/final_transfer/recommended/recommended_firewall",
+  "bundle_path": "runtime_models/full_canonical__lgbm",
+  "files": [
+    "calibrator.pkl",
+    "calibrator_wrapper.pkl",
+    "extractor_config.json",
+    "feature_family.json",
+    "feature_order.json",
+    "model.pkl",
+    "model_card.json",
+    "policy_report.json",
+    "runtime_loader_config.json",
+    "session_metrics.json",
+    "thresholds.json"
+  ],
+  "runtime_binary_exported": true,
+  "runtime_loader_config": "runtime_models/full_canonical__lgbm/runtime_loader_config.json"
+}

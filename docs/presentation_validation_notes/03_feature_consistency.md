@@ -81,4 +81,3 @@ plt.plot([min, max], [min, max], 'r--')
 plt.xscale('log'); plt.yscale('log')
 plt.savefig('figures/validation/rate_feature_formula_consistency.png')
 ```
-

@@ -1,0 +1,53 @@
+{
+  "model_id": "full_canonical__lgbm",
+  "policy": "open_set_three_tier",
+  "action_mode": "simulation",
+  "simulation_only": true,
+  "production_ready": false,
+
+  "probability_column": "prob",
+  "aggregation_strategy": "mean_per_capture",
+
+  "source_split": "val",
+  "threshold_selection_method": "quantile_on_benign_val_sessions",
+  "validation_selection_note": "Thresholds derived exclusively from the validation split (val_predictions.csv). 100 benign sessions + 1 VPN session. No test data used for threshold selection.",
+
+  "review_threshold": 0.027090,
+  "block_threshold": 0.165365,
+  "review_threshold_basis": "p95 benign session score (val split)",
+  "block_threshold_basis": "max benign session score (zero block-FPR on val)",
+
+  "target_fpr_review": 0.05,
+  "target_fpr_block": 0.0,
+  "achieved_review_fpr_on_val": 0.04,
+  "achieved_block_fpr_on_val": 0.01,
+
+  "review_policy_description": "The FLAG_REVIEW band [0.027090, 0.165365) acts as an uncertainty absorber. Under domain shift, benign traffic in unseen environments may produce elevated but unreliable scores. Instead of forcing a binary PASS/BLOCK decision, these flows are routed to a human analyst queue. This reduces risky automatic decisions when the model is operating outside its training distribution.",
+
+  "action_mapping": {
+    "PASS":             "score < 0.027090  — Score below review threshold. Traffic consistent with benign baseline.",
+    "FLAG_REVIEW":      "0.027090 <= score < 0.165365  — Uncertain. Manual review recommended.",
+    "SIMULATED_BLOCK":  "score >= 0.165365  [SIMULATION ONLY — no real packet blocking]"
+  },
+
+  "explanation_templates": {
+    "PASS":             "Score below review threshold. Traffic pattern consistent with benign baseline.",
+    "FLAG_REVIEW":      "Score is uncertain; manual review recommended.",
+    "SIMULATED_BLOCK":  "Score exceeds block threshold; simulated block recommendation. [SIMULATION ONLY — no real packet blocking.]"
+  },
+
+  "val_calibration_result": {
+    "n_benign_sessions": 100,
+    "n_vpn_sessions": 1,
+    "benign_PASS": 95,
+    "benign_FLAG_REVIEW": 4,
+    "benign_SIMULATED_BLOCK": 1,
+    "vpn_PASS": 0,
+    "vpn_FLAG_REVIEW": 0,
+    "vpn_SIMULATED_BLOCK": 1
+  },
+
+  "disclaimer": "SIMULATION ONLY. No real packets are blocked. All SIMULATED_BLOCK decisions are audit/log events only. This prototype is not production-ready.",
+  "source_artifact": "artifacts/final_transfer/models/full_canonical__lgbm/thresholds.json",
+  "updated_utc": "2026-05-29T10:00:00.000000+00:00"
+}

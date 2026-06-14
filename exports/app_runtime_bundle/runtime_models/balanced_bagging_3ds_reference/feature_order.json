@@ -1,0 +1,14 @@
+{
+  "feature_order": [
+    "sz_coef_variation",
+    "sz_p25_median_ratio",
+    "sz_p75_median_ratio",
+    "sz_iqr_norm_median",
+    "dispersion_symmetry",
+    "direction_balance_bytes",
+    "direction_balance_packets"
+  ],
+  "n_features": 7,
+  "recovered_from": "model_cat_bag0.pkl",
+  "method": "model attribute (feature_names_/feature_name_/feature_names_in_/Booster.feature_names)"
+}

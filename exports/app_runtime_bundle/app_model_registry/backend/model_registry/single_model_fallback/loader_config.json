@@ -1,0 +1,22 @@
+{
+  "model_id": "single_model_fallback",
+  "source_artifact": "artifacts/clean_pipeline/models",
+  "model_files": {
+    "xgb": [
+      "xgb_model.pkl"
+    ]
+  },
+  "calibrators": {
+    "isotonic": null,
+    "platt": null
+  },
+  "ensemble_weights": {
+    "xgb": 1.0
+  },
+  "feature_order_file": "feature_order.json",
+  "probability_column": "xgb_score",
+  "score_column_in_source_predictions": "xgb_score",
+  "session_grouping_column": "capture_id",
+  "session_aggregation": "p80",
+  "wt5_source": null
+}

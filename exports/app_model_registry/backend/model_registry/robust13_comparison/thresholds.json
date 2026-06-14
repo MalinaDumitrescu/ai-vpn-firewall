@@ -1,0 +1,25 @@
+{
+  "threshold_source": "recomputed_from_validation",
+  "selection_split": "val",
+  "evaluation_split": "test",
+  "session_grouping_column": "capture_id",
+  "session_aggregation": "wt5",
+  "probability_column": "prob_platt",
+  "strict": {
+    "threshold": 0.8532016053215683,
+    "target": "benign FPR == 0 on val",
+    "action": "BLOCK",
+    "safety": "block_safe_on_test"
+  },
+  "balanced": {
+    "threshold": 0.8431458233721466,
+    "target": "benign FPR <= 0.01 on val",
+    "action": "FLAG_REVIEW",
+    "safety": "within_fpr_budget_on_test"
+  },
+  "action_mapping": {
+    "strict_trigger": "BLOCK",
+    "balanced_trigger_only": "FLAG_REVIEW",
+    "no_trigger": "PASS"
+  }
+}

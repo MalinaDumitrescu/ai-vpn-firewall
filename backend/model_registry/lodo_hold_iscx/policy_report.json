@@ -1,0 +1,69 @@
+{
+  "model_id": "lodo_hold_iscx",
+  "status_banner": "Negative control / LODO stress-test model. Not deployable.",
+  "role": "negative_control",
+  "held_out_dataset": "iscx",
+  "deployable": false,
+  "supports_firewall_actions": false,
+  "supports_live_mode": false,
+  "recommended_use": "robustness/stress-test evidence only",
+  "selected_combination": {
+    "probability_column": "prob_iso",
+    "aggregation": "p80"
+  },
+  "thresholds": {
+    "strict": 0.6666666666666667,
+    "balanced": 1.0
+  },
+  "test_metrics": {
+    "held_out_dataset": "iscx",
+    "holdout_isolated_in_test_split": true,
+    "n_val_sessions": 85,
+    "n_test_sessions": 140,
+    "session_auc_test": 0.5622965374371116,
+    "per_dataset_session_auc_test": {
+      "iscx": 0.5622965374371116
+    },
+    "strict": {
+      "recall": 0.0,
+      "fpr": 0.0,
+      "TP": 0,
+      "FP": 0,
+      "TN": 109,
+      "FN": 31
+    },
+    "balanced": {
+      "recall": 0.0,
+      "fpr": 0.0,
+      "TP": 0,
+      "FP": 0,
+      "TN": 109,
+      "FN": 31
+    },
+    "reporting_only": true,
+    "deployable": false
+  },
+  "leakage_checks": {
+    "has_split_col": true,
+    "flow_overlap_train_val": 0,
+    "flow_overlap_train_test": 0,
+    "flow_overlap_val_test": 0,
+    "capture_overlap_train_val": 0,
+    "capture_overlap_train_test": 0,
+    "capture_overlap_val_test": 0
+  },
+  "any_overlap_detected": false,
+  "safety_flags": {
+    "strict_unsafe_for_blocking": false,
+    "balanced_review_only": false,
+    "production_readiness": false,
+    "recommended_action_mode": "report_only"
+  },
+  "wt5_verified": true,
+  "wt5_source": "src/deployment/decision_engine.py::_wt5_agg",
+  "warnings": [
+    "Negative control / LODO stress-test model. Not deployable.",
+    "Do not expose this entry to Firewall Mode in the application."
+  ],
+  "all_combinations_csv": "reports/tables/lodo_hold_iscx_policy_packaging_check.csv"
+}

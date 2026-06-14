@@ -1,0 +1,161 @@
+{
+  "generated_utc": "2026-05-29T10:00:00.000000+00:00",
+  "note": "Robustness page configuration for the runtime app UI.",
+
+  "simulation_banner": {
+    "text": "\u26a0\ufe0f SIMULATION ONLY \u2014 No packets are blocked. No real firewall actions. This prototype is not production-ready.",
+    "color": "red",
+    "icon": "\u26a0\ufe0f",
+    "show": true
+  },
+
+  "page_title": "Robustness & Transfer Analysis",
+  "page_subtitle": "Domain fingerprinting, transfer performance, and known limitations",
+
+  "recommended_model_section": {
+    "model_id": "full_canonical__lgbm",
+    "heading": "full_canonical__lgbm \u2014 Best Known-Domain Prototype",
+    "summary": "full_canonical__lgbm achieves near-perfect in-distribution detection (Pooled AUC = 0.9994) with honest capture-level evaluation and good calibration (ECE = 0.0026). It is the best deployment-eligible prototype from the final_transfer experiment.",
+    "limitation_note": "However, it remains a known-domain / simulation-only prototype. Domain AUC = 1.0 and LODO-min AUC \u2248 0.616 confirm that dataset fingerprinting is structural and unresolved. The model should not be deployed in unseen network environments without further data collection.",
+    "simulation_notice": "This model is simulation-only. No packets are blocked. All SIMULATED_BLOCK actions are audit/log events only.",
+    "status_pills": [
+      {"label": "\u2705 Deployment-eligible",          "color": "green"},
+      {"label": "\u2705 Capture-level splits",          "color": "green"},
+      {"label": "\u2705 Low calibration error",         "color": "green"},
+      {"label": "\u26a0\ufe0f Domain AUC = 1.0",       "color": "red"},
+      {"label": "\u26a0\ufe0f LODO-min AUC = 0.616",   "color": "orange"},
+      {"label": "\ud83d\udeab Not production-ready",   "color": "red"},
+      {"label": "\ud83d\udd2c Simulation only",        "color": "orange"}
+    ]
+  },
+
+  "domain_fingerprinting_section": {
+    "heading": "Domain Fingerprinting — Structural and Unresolved",
+    "explanation": [
+      "The model achieves Domain AUC = 1.0, meaning it perfectly identifies which dataset a flow came from (ISCX, USBVPN, or VNAT). This is called dataset fingerprinting.",
+      "Fingerprinting arises because features such as fwd_pkt_len_mean, bwd_pkt_len_mean, and flow_iat_mean encode absolute network conditions that differ systematically across datasets (capture environment, VPN software version, OS, hardware).",
+      "This is not a bug or an artifact of the feature selection — it is structural. The datasets were captured in different environments at different times, and the model learns to discriminate datasets instead of (or in addition to) VPN traffic.",
+      "Consequence: the model's in-distribution performance (Pooled AUC = 0.9994) is partially inflated by this fingerprinting. When evaluated on unseen datasets (LODO), performance drops to LODO-min AUC = 0.616."
+    ],
+    "dann_experiment": {
+      "heading": "DANN Adversarial Training — Did Not Resolve Fingerprinting",
+      "summary": "DANN v2 (Domain-Adversarial Neural Network) was trained across 21 hyperparameter configurations with lambda annealing up to 5.0, balanced mini-batching, and an embedding-level domain classifier. The goal was to learn a domain-invariant representation.",
+      "result": "Best embedding_domain_auc remained ≈ 1.0. Domain reduction ≈ 0.0003. DANN failed to reduce dataset fingerprinting.",
+      "conclusion": "Dataset fingerprinting is structural and cannot be resolved by adversarial training alone. New capture environments are required."
+    }
+  },
+
+  "lodo_section": {
+    "heading": "Leave-One-Dataset-Out (LODO) Transfer Performance",
+    "description": "LODO evaluation measures how well the model detects VPN traffic when an entire dataset is held out during training. This simulates deployment in a new network environment.",
+    "results": [
+      {
+        "model_id": "full_canonical_lgbm",
+        "model_label": "full_canonical__lgbm",
+        "lodo_iscx_auc": 0.6164,
+        "lodo_vnat_auc": 0.6898,
+        "lodo_usbvpn_auc": null,
+        "lodo_mean_auc": 0.6531,
+        "lodo_min_auc": 0.6164,
+        "interpretation": "Moderate transfer. When ISCX-VPN-2016 is held out, AUC drops to ~0.616 — only marginally above random. The three-tier FLAG_REVIEW band provides a safety buffer under domain shift."
+      },
+      {
+        "model_id": "timing_shape_lgbm",
+        "model_label": "timing_shape__lgbm (low-fingerprint)",
+        "lodo_iscx_auc": 0.4512,
+        "lodo_vnat_auc": 0.5,
+        "lodo_usbvpn_auc": null,
+        "lodo_mean_auc": 0.4756,
+        "lodo_min_auc": 0.4512,
+        "interpretation": "Worse transfer despite lower domain_auc. Reducing fingerprinting without new data does not improve generalisation."
+      }
+    ],
+    "note": "USBVPN LODO is not evaluated (single capture per class). All LODO evaluations use capture-level splits."
+  },
+
+  "deployment_limitations_section": {
+    "heading": "Deployment Limitations",
+    "limitations": [
+      {
+        "id": "known_domain_only",
+        "title": "Known-Domain Only",
+        "severity": "high",
+        "description": "The model was trained and evaluated on ISCX-VPN-2016, USBVPN, and VNAT. Performance on unseen deployment environments is unknown. Domain AUC = 1.0 confirms this."
+      },
+      {
+        "id": "structural_fingerprinting",
+        "title": "Structural Dataset Fingerprinting",
+        "severity": "high",
+        "description": "Domain AUC = 1.0. The model memorises dataset origin. DANN adversarial training did not resolve this. New capture environments are required."
+      },
+      {
+        "id": "moderate_transfer",
+        "title": "Moderate Transfer Performance",
+        "severity": "medium",
+        "description": "LODO-min AUC = 0.616. When ISCX-VPN-2016 is held out, detection is only marginally better than random. The FLAG_REVIEW uncertainty band partially mitigates this."
+      },
+      {
+        "id": "simulation_only",
+        "title": "Simulation Only \u2014 No Real Packet Blocking",
+        "severity": "medium",
+        "description": "All SIMULATED_BLOCK decisions are log/alert actions. No real packets are blocked. This system has no integration with any packet-filtering or firewall infrastructure. Not production-ready."
+      },
+      {
+        "id": "small_val_set",
+        "title": "Small Threshold Validation Set",
+        "severity": "low",
+        "description": "Thresholds derived from 101 sessions (100 benign + 1 VPN). With a richer validation set, thresholds should be recomputed."
+      },
+      {
+        "id": "feature_pipeline_dependency",
+        "title": "Feature Extraction Dependency",
+        "severity": "medium",
+        "description": "Requires the same CICFlowMeter-compatible feature pipeline used during training. Feature order is specified in feature_order.json. Any change to extraction parameters will degrade performance."
+      }
+    ]
+  },
+
+  "legacy_model_section": {
+    "heading": "Legacy Baseline: robust9_firewall",
+    "model_id": "robust9_firewall",
+    "note": "robust9_firewall is retained as a legacy/historical baseline for comparison purposes only. It is not the recommended model and has been superseded by full_canonical__lgbm. No LODO or domain-fingerprinting evaluation is available for robust9.",
+    "simulation_notice": "robust9_firewall is also simulation-only. No packets are blocked.",
+    "status_pills": [
+      {"label": "\u2193 Legacy baseline",              "color": "grey"},
+      {"label": "Superseded by full_canonical__lgbm", "color": "grey"},
+      {"label": "\ud83d\udd2c Simulation only",        "color": "orange"},
+      {"label": "\ud83d\udeab Not production-ready",   "color": "red"}
+    ]
+  },
+
+  "next_steps_section": {
+    "heading": "Next Improvement Ideas",
+    "items": [
+      {
+        "priority": "high",
+        "title": "New Capture Environments",
+        "description": "Collect VPN traffic from 2\u20133 additional OS/hardware/network configurations. Domain AUC will only drop when feature distributions overlap across environments."
+      },
+      {
+        "priority": "high",
+        "title": "Modern VPN Protocols",
+        "description": "Add WireGuard, QUIC-over-VPN captures. Current datasets are OpenVPN/PPTP-era."
+      },
+      {
+        "priority": "medium",
+        "title": "relative_shape_v2 + GroupDRO",
+        "description": "Ratio/CV features + iterative worst-domain reweighting. Target: LODO-min AUC > 0.616 without new data."
+      },
+      {
+        "priority": "medium",
+        "title": "Packet-Sequence Models",
+        "description": "CNN/LSTM on per-packet byte sequences instead of flow statistics. Reduces absolute-scale dependence."
+      },
+      {
+        "priority": "low",
+        "title": "Concept Drift Monitoring",
+        "description": "Deploy with a domain-shift detector. Alert when incoming flow statistics diverge from training distribution."
+      }
+    ]
+  }
+}

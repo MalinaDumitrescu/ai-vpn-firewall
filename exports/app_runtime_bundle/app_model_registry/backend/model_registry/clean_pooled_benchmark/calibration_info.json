@@ -1,0 +1,10 @@
+{
+  "isotonic_calibrator_file": null,
+  "platt_calibrator_file": null,
+  "selected_probability_column": "ensemble_score",
+  "available_probability_columns": [
+    "ensemble_score"
+  ],
+  "selection_rationale": "Only one score column available; no isotonic/platt calibration persisted.",
+  "calibration_source_metrics_from_artifact": "artifacts/clean_pipeline/models/evaluation_report.json"
+}

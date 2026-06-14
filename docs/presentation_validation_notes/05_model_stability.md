@@ -78,4 +78,3 @@ plt.errorbar(metrics, means, yerr=[np.array(means)-np.array(ci_lowers), np.array
 plt.title('Bootstrap Confidence Intervals')
 plt.savefig('figures/validation/bootstrap_confidence_intervals.png')
 ```
-

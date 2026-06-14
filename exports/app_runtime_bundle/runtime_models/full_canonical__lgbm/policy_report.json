@@ -1,0 +1,51 @@
+{
+  "model_id": "full_canonical__lgbm",
+  "policy": "open_set_three_tier",
+  "action_mode": "simulation",
+  "simulation_only": true,
+  "production_ready": false,
+  "review_threshold": 0.02709,
+  "block_threshold": 0.165365,
+  "three_tier_decisions": {
+    "PASS": "score < 0.02709",
+    "FLAG_REVIEW": "0.02709 <= score < 0.165365",
+    "SIMULATED_BLOCK": "score >= 0.165365"
+  },
+  "val_performance": {
+    "n_sessions": 101,
+    "n_vpn_sessions": 1,
+    "n_benign_sessions": 100,
+    "benign_sessions_PASS": 95,
+    "benign_sessions_FLAG_REVIEW": 4,
+    "benign_sessions_SIMULATED_BLOCK": 1,
+    "vpn_sessions_PASS": 0,
+    "vpn_sessions_FLAG_REVIEW": 0,
+    "vpn_sessions_SIMULATED_BLOCK": 1,
+    "benign_block_fpr": 0.01,
+    "benign_review_fpr": 0.05,
+    "vpn_detection_rate_any_action": 1.0,
+    "review_threshold": 0.02709,
+    "block_threshold": 0.165365
+  },
+  "test_performance": {
+    "n_sessions": 104,
+    "n_vpn_sessions": 3,
+    "n_benign_sessions": 101,
+    "benign_sessions_PASS": 99,
+    "benign_sessions_FLAG_REVIEW": 1,
+    "benign_sessions_SIMULATED_BLOCK": 1,
+    "vpn_sessions_PASS": 0,
+    "vpn_sessions_FLAG_REVIEW": 0,
+    "vpn_sessions_SIMULATED_BLOCK": 3,
+    "benign_block_fpr": 0.009900990099009901,
+    "benign_review_fpr": 0.019801980198019802,
+    "vpn_detection_rate_any_action": 1.0,
+    "review_threshold": 0.02709,
+    "block_threshold": 0.165365
+  },
+  "warnings": [
+    "SIMULATION ONLY. No real packets are blocked.",
+    "Known-domain prototype. domain_auc=1.0.",
+    "Not production-ready."
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "n_val_sessions": 120,
+  "n_test_sessions": 124,
+  "session_auc_test": 0.9389483065953654,
+  "per_dataset_session_auc_test": {
+    "iscx": 0.7499999999999999,
+    "usbvpn": 0.9472222222222222,
+    "vnat": 1.0
+  },
+  "strict": {
+    "recall": 0.09090909090909091,
+    "fpr": 0.0,
+    "TP": 2,
+    "FP": 0,
+    "TN": 102,
+    "FN": 20
+  },
+  "balanced": {
+    "recall": 0.7272727272727273,
+    "fpr": 0.0,
+    "TP": 16,
+    "FP": 0,
+    "TN": 102,
+    "FN": 6
+  },
+  "review_load_test": 0.0,
+  "n_block_test": 2,
+  "n_flag_review_test": 0
+}

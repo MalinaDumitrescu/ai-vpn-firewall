@@ -1,0 +1,74 @@
+{
+  "model_id": "full_canonical__lgbm",
+  "display_name": "Full Canonical LightGBM (Final Selected Firewall)",
+  "status": "deployment_eligible",
+  "role": "recommended_firewall",
+  "source_artifact": "artifacts/final_transfer/recommended/recommended_firewall",
+  "created_utc": "2026-05-29T00:00:00.000000+00:00",
+  "training": {
+    "algorithm": "LightGBM",
+    "feature_family": "full_canonical",
+    "n_features": 34,
+    "retrained_in_packaging": false,
+    "note": "Packaging is read-only. Model artifact loaded from final_transfer/recommended/recommended_firewall/model.pkl."
+  },
+  "ensemble": {
+    "type": "single_model",
+    "families": [
+      "lightgbm"
+    ],
+    "bags_per_family": 1,
+    "note": "Not an ensemble. Single LightGBM model trained with balanced bagging on 3-dataset pooled data."
+  },
+  "calibration": {
+    "primary_method": "none_for_three_tier_policy",
+    "calibrator_available": true,
+    "calibrator_file": "calibrator.pkl",
+    "note": "Isotonic calibrator available but three-tier thresholds use raw LightGBM prob directly."
+  },
+  "probability_columns_available": [
+    "prob"
+  ],
+  "selected_probability_column": "prob",
+  "selected_aggregation": "mean_per_capture",
+  "session_grouping_column": "capture_id",
+  "policy": "open_set_three_tier",
+  "thresholds": {
+    "review": 0.02709,
+    "block": 0.165365,
+    "bands": {
+      "PASS": "score < 0.027090",
+      "FLAG_REVIEW": "0.027090 <= score < 0.165365",
+      "SIMULATED_BLOCK": "score >= 0.165365"
+    }
+  },
+  "metrics": {
+    "pooled_auc": 0.9994,
+    "lodo_min_auc": 0.6164,
+    "lodo_mean_auc": 0.6531,
+    "domain_auc": 1.0,
+    "fpr_at_0.5": 0.0025,
+    "ece": 0.0026,
+    "deployment_final_score": 0.6836,
+    "runtime_compatible": true
+  },
+  "intended_use": "VPN/benign session-level firewall scoring for the FastAPI+React demo app.",
+  "recommended_action_mode": "simulation",
+  "production_readiness": false,
+  "production_readiness_note": "Simulation mode only. Known-domain prototype. domain_auc=1.0 \u2014 dataset origin is perfectly predictable. Not suitable for deployment to unseen network environments.",
+  "warnings": [
+    "Dataset fingerprinting remains unresolved (domain_auc=1.0).",
+    "Known-domain simulation prototype only.",
+    "Not production-ready.",
+    "No packets are blocked.",
+    "LODO-min AUC = 0.6164 \u2014 moderate cross-dataset transfer.",
+    "DANN v2 adversarial training did not reduce embedding fingerprinting (domain_reduction \u2248 0.0003)."
+  ],
+  "ui_group": "main_demo_comparison",
+  "ui_visible_main": true,
+  "ui_selectable_for_comparison": true,
+  "ui_selectable_for_firewall_inference": true,
+  "ui_badge": "Final recommended firewall (simulation)",
+  "ui_warning": "Simulation-only. Best deployment-eligible known-domain prototype. NOT production-ready.",
+  "ui_sort_order": 0
+}

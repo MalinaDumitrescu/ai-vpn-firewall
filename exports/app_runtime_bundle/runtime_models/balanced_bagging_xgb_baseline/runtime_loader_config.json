@@ -1,0 +1,41 @@
+{
+  "wrapper_type": "diverse_bagging_ensemble_with_calibration",
+  "model_id": "balanced_bagging_xgb_baseline",
+  "bundle_layout": "runtime_models/<model_id>/",
+  "family_scope": "xgboost_only",
+  "model_files": {
+    "xgb": [
+      "runtime_models/balanced_bagging_xgb_baseline/model_xgb_bag0.pkl",
+      "runtime_models/balanced_bagging_xgb_baseline/model_xgb_bag1.pkl",
+      "runtime_models/balanced_bagging_xgb_baseline/model_xgb_bag2.pkl"
+    ]
+  },
+  "calibrators": {
+    "isotonic": "runtime_models/balanced_bagging_xgb_baseline/isotonic_calibrator.pkl",
+    "platt": "runtime_models/balanced_bagging_xgb_baseline/platt_calibrator.pkl"
+  },
+  "ensemble_weights": {
+    "xgb": 1.0
+  },
+  "feature_order_file": "runtime_models/balanced_bagging_xgb_baseline/feature_order.json",
+  "thresholds_file": "runtime_models/balanced_bagging_xgb_baseline/thresholds.json",
+  "model_card_file": "runtime_models/balanced_bagging_xgb_baseline/model_card.json",
+  "policy_report_file": "runtime_models/balanced_bagging_xgb_baseline/policy_report.json",
+  "session_metrics_file": "runtime_models/balanced_bagging_xgb_baseline/session_metrics.json",
+  "calibration_info_file": "runtime_models/balanced_bagging_xgb_baseline/calibration_info.json",
+  "probability_column": "prob_raw",
+  "session_grouping_column": "capture_id",
+  "session_aggregation": "wt5",
+  "wt5_source": "src/deployment/decision_engine.py::_wt5_agg",
+  "registry_reference": "app_model_registry/backend/model_registry/registry.json",
+  "supports_firewall_actions": false,
+  "supports_live_mode": false,
+  "recommended_action_mode": "simulation",
+  "production_readiness": false,
+  "notes": [
+    "Artifact ships only model_xgb_bag*.pkl. Predictions contain p_lgbm_raw/p_cat_raw columns inherited from the shared schema but those families are NOT available for real inference. Loader exposes XGB bags only.",
+    "All paths are RELATIVE to the runtime bundle root.",
+    "Only robust9_firewall is the default firewall model.",
+    "Comparison models are simulation-only CSV evaluation models."
+  ]
+}

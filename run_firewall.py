@@ -2,16 +2,23 @@
 """
 run_firewall.py — CLI for the VPN detection firewall.
 
+Selected model:  full_canonical__lgbm  (final_transfer experiment)
+Mode:            simulation
+Production-ready: NO  (known-domain prototype only)
+
 Usage examples:
+
+  # Open-set three-tier evaluation on validation predictions
+  python run_firewall.py open-set-eval
+
+  # Show model registry status
+  python run_firewall.py registry
 
   # Evaluate ensemble on test set (STRICT mode, zero-FPR)
   python run_firewall.py evaluate
 
   # Evaluate in BALANCED mode (≤0.1% FPR)
   python run_firewall.py evaluate --mode balanced
-
-  # Evaluate with reduced features (no direction balance — domain-robust)
-  python run_firewall.py evaluate --drop-direction
 
   # Compare all three modes side-by-side
   python run_firewall.py compare
@@ -37,6 +44,18 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# ── Model registry constants ──────────────────────────────────────────────────
+REGISTRY_DIR = PROJECT_ROOT / "backend" / "model_registry"
+DEFAULT_MODEL = "full_canonical_lgbm"
+DEFAULT_MODEL_SOURCE = "artifacts/final_transfer/models/full_canonical__lgbm"
+SIMULATION_DISCLAIMER = (
+    "\n  ⚠  SIMULATION ONLY — No real packet blocking.\n"
+    "     All SIMULATED_BLOCK decisions are audit/log events.\n"
+    f"     Default model: {DEFAULT_MODEL}\n"
+    "     Production-ready: NO (known-domain prototype)\n"
+)
+# ─────────────────────────────────────────────────────────────────────────────
+
 from demo_firewall import (
     FirewallBlocker,
     DeploymentMode,
@@ -44,6 +63,101 @@ from demo_firewall import (
     ThresholdLeakageError,
 )
 from demo_firewall.report import format_report, save_report
+
+
+def cmd_registry(args):
+    """Show model registry status."""
+    reg_path = REGISTRY_DIR / "registry.json"
+    if not reg_path.exists():
+        print("  ERROR: registry.json not found.")
+        sys.exit(1)
+
+    reg = json.load(open(reg_path))
+    ui = json.load(open(REGISTRY_DIR / "ui_model_groups.json")) if (REGISTRY_DIR / "ui_model_groups.json").exists() else {}
+    al = json.load(open(REGISTRY_DIR / "runtime_inference_allowlist.json")) if (REGISTRY_DIR / "runtime_inference_allowlist.json").exists() else {}
+
+    print(f"\n{'='*72}")
+    print(f"  MODEL REGISTRY — VPN FIREWALL")
+    print(SIMULATION_DISCLAIMER)
+    print(f"  Default firewall model: {ui.get('default_firewall_model_display_id', ui.get('default_firewall_model', DEFAULT_MODEL))}")
+    print(f"  Registry updated:       {reg.get('updated_utc','N/A')}")
+    print(f"{'='*72}\n")
+
+    models = reg.get("models", {})
+    # Sort by ui_sort_order
+    sorted_models = sorted(models.items(), key=lambda x: x[1].get("ui_sort_order", 99))
+
+    print(f"  {'Model ID':35s} {'Role':20s} {'Status':25s} {'Eligible':>9} {'AUC':>7} {'LODO-min':>9}")
+    print("  " + "-" * 110)
+    for mid, m in sorted_models:
+        status = m.get("status", "unknown")
+        role = m.get("role", "")[:20]
+        eligible = "✅" if m.get("deployment_eligible", False) else ("" if status in ("research_only", "comparison_only") else "❌")
+        auc = m.get("pooled_auc") or m.get("session_auc_test")
+        lodo = m.get("lodo_min_auc")
+        auc_s = f"{auc:.4f}" if isinstance(auc, float) else "N/A"
+        lodo_s = f"{lodo:.4f}" if isinstance(lodo, float) else "N/A"
+        if mid == DEFAULT_MODEL:
+            marker = " ★"
+        elif mid == "robust9_firewall":
+            marker = " ↓"
+        elif status == "research_only":
+            marker = " "
+        else:
+            marker = ""
+        print(f"  {mid:35s} {role:20s} {status:25s} {eligible:>9} {auc_s:>7} {lodo_s:>9}{marker}")
+
+    print()
+    print(f"  ★ = recommended default  ↓ = legacy baseline   = research only")
+    print()
+
+    # Open-set policy for default model
+    rec = models.get(DEFAULT_MODEL, {})
+    osp = rec.get("open_set_policy", {})
+    if osp:
+        print(f"  Open-set policy ({DEFAULT_MODEL}):")
+        print(f"     PASS            →  score < {osp.get('review_threshold', 'N/A')}")
+        print(f"     FLAG_REVIEW     →  {osp.get('review_threshold','N/A')} <= score < {osp.get('block_threshold','N/A')}")
+        print(f"     SIMULATED_BLOCK →  score >= {osp.get('block_threshold','N/A')}  [SIMULATION ONLY]")
+        print()
+
+    # Warnings
+    if rec.get("warnings"):
+        print(f"  ⚠  Warnings for {DEFAULT_MODEL}:")
+        for w in rec["warnings"]:
+            print(f"     • {w}")
+    print()
+
+
+def cmd_open_set_eval(args):
+    """Run open-set three-tier evaluation on val predictions."""
+    from pathlib import Path
+    from demo_firewall.open_set_policy import load_policy
+    from demo_firewall.report import render_open_set_dashboard
+    import pandas as pd
+
+    val_path = PROJECT_ROOT / DEFAULT_MODEL_SOURCE / "val_predictions.csv"
+    if not val_path.exists():
+        print(f"  ERROR: val_predictions.csv not found at {val_path}")
+        sys.exit(1)
+
+    policy = load_policy(repo_root=PROJECT_ROOT)
+    df = pd.read_csv(val_path)
+
+    print(f"\n{'='*72}")
+    print(f"  OPEN-SET THREE-TIER EVALUATION — {DEFAULT_MODEL}")
+    print(SIMULATION_DISCLAIMER)
+
+    decisions = policy.evaluate_dataframe(df)
+    report = policy.dashboard_report(decisions)
+    print(render_open_set_dashboard(report))
+
+    if args.save_report:
+        out_dir = PROJECT_ROOT / args.output_dir
+        path = save_report(report, out_dir, prefix="open_set_eval")
+        print(f"\n  Report saved to: {path}")
+
+    return report
 
 
 def cmd_evaluate(args):
@@ -380,6 +494,14 @@ def main():
     p_info = sub.add_parser("info", help="Show system diagnostics")
     add_common_args(p_info)
 
+    # registry
+    p_reg = sub.add_parser("registry", help="Show model registry status")
+
+    # open-set-eval
+    p_open_set_eval = sub.add_parser("open-set-eval", help="Open-set three-tier evaluation on val predictions")
+    p_open_set_eval.add_argument("--save-report", action="store_true", help="Save report as JSON")
+    p_open_set_eval.add_argument("--output-dir", default="artifacts/eval", help="Report output dir")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -392,6 +514,8 @@ def main():
         "predict": cmd_predict,
         "info": cmd_info,
         "per-dataset": cmd_per_dataset,
+        "registry": cmd_registry,
+        "open-set-eval": cmd_open_set_eval,
     }
 
     try:

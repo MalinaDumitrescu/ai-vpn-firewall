@@ -1,0 +1,33 @@
+{
+  "model_id": "balanced_bagging_baseline",
+  "source_artifact": "artifacts/balanced_bagging",
+  "packaged_utc": "2026-05-26T07:57:32.235218+00:00",
+  "package_files": {
+    "model_card": "model_card.json",
+    "loader_config": "loader_config.json",
+    "feature_order": "feature_order.json",
+    "calibration_info": "calibration_info.json",
+    "thresholds": "thresholds.json",
+    "session_metrics": "session_metrics.json",
+    "policy_report": "policy_report.json"
+  },
+  "source_artifact_file_sha256": {
+    "isotonic_calibrator.pkl": "805780f95189438adcc7be120ae98b51287de800735353e5ab084ebc27de4bee",
+    "metrics.json": "0f60b9c643d9e1789854a6687cf035d4cfc45083059747a8ee7ed0b76ea336e9",
+    "model_cat_bag0.pkl": "3bf7c2a5004cc41dc3fef56134aebf2954e478d88283f8aa95a86fb6f89e399f",
+    "model_cat_bag1.pkl": "3b96620f7f4258c3a4d9fd03d1763ef676db9544fa87d2657283e4b2130c5d86",
+    "model_cat_bag2.pkl": "8bc36771e00c0d1430443927c8042393b14efe3fd05639d9a98317c6f62c7d90",
+    "model_lgbm_bag0.pkl": "21c13d153d4c993068074c9507f175d5a76e404ee2033549ff797f502fa49bb7",
+    "model_lgbm_bag1.pkl": "c68a0fd073766fa3e8d71bd6839daa8470b6b72a3a6caa1b7bd0c78a69bc9137",
+    "model_lgbm_bag2.pkl": "66cc39c99476b50322cce6a98128e1193fed455380011c2d91bacfa21b7e222f",
+    "model_xgb_bag0.pkl": "65e7862317df7221b37f8c466c1b6077c746878e9d07a705ab9a66f27fd83b62",
+    "model_xgb_bag1.pkl": "0c04e550f785c159224824a4dfac191ccdfdf558adc2a6c6364ff3b114667f7d",
+    "model_xgb_bag2.pkl": "e94e4beb5d99f1d4716698d1b4434c927053825c6d2d018a909b916bce073abd",
+    "platt_calibrator.pkl": "90e13eb2ec02c738d024d3d82d001e2b7dabe04a80031e0842bc4fcbc3d13271",
+    "predictions.csv": "aa0b69649b38f46789fb4879458ea79575c7f4088d03b1a4053481f1f3f08890"
+  },
+  "policy_utils_version": {
+    "wt5_verified": true,
+    "wt5_source": "src/deployment/decision_engine.py::_wt5_agg"
+  }
+}
