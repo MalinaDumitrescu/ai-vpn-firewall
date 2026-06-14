@@ -1,0 +1,52 @@
+{
+  "model_id": "balanced_bagging_xgb_baseline",
+  "display_name": "Balanced Bagging XGB-only Baseline",
+  "source_artifact": "artifacts/balanced_bagging_xgb",
+  "created_utc": "2026-05-26T07:57:32.235218+00:00",
+  "role": "single_family_baseline",
+  "training": {
+    "retrained_in_packaging": false,
+    "note": "Packaging is read-only; thresholds derived from existing predictions.csv on val and evaluated on test."
+  },
+  "ensemble": {
+    "families": [
+      "xgboost"
+    ],
+    "bags_per_family": 3,
+    "family_scope": "xgboost_only"
+  },
+  "calibrators": {
+    "isotonic": "isotonic_calibrator.pkl",
+    "platt": "platt_calibrator.pkl"
+  },
+  "feature_order": {
+    "n_features": 27,
+    "recovered_from": "model_xgb_bag0.pkl"
+  },
+  "probability_columns_available": [
+    "prob_raw",
+    "prob_iso",
+    "prob_platt"
+  ],
+  "selected_probability_column": "prob_raw",
+  "selected_aggregation": "wt5",
+  "session_grouping_column": "capture_id",
+  "intended_use": "True single-family XGBoost baseline for comparison only.",
+  "recommended_action_mode": "simulation",
+  "production_readiness": false,
+  "supports_firewall_actions": true,
+  "supports_live_mode": false,
+  "warnings": [
+    "comparison-only, not deployment-approved"
+  ],
+  "notes": [
+    "Artifact ships only XGB bag binaries; LGBM/CatBoost prob columns present in predictions.csv are not backed by binaries and must not be used for real inference."
+  ],
+  "ui_group": "main_demo_comparison",
+  "ui_visible_main": true,
+  "ui_selectable_for_comparison": true,
+  "ui_selectable_for_firewall_inference": false,
+  "ui_badge": "Comparison-only",
+  "ui_warning": "Comparison-only, not deployment-approved.",
+  "ui_sort_order": 3
+}

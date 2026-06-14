@@ -11,8 +11,8 @@ strategies:
     aggregation: p90
     calibration: prob_raw
     normalization: passthrough
-    block_threshold: 0.9697
-    flag_threshold: 0.90
+    block_threshold: 0.8777
+    flag_threshold: 0.8338
     adaptive: false
     recalibrate: false
     drift_escalation: true
@@ -25,8 +25,8 @@ strategies:
     aggregation: wt5
     calibration: prob_iso
     normalization: passthrough
-    block_threshold: 0.7447
-    flag_threshold: 0.4977
+    block_threshold: 0.0886
+    flag_threshold: 0.0443
     adaptive: false
     recalibrate: false
     drift_escalation: true
@@ -39,8 +39,8 @@ strategies:
     aggregation: wt5
     calibration: prob_iso
     normalization: passthrough
-    block_threshold: 0.7447
-    flag_threshold: 0.4977
+    block_threshold: 0.0886
+    flag_threshold: 0.0443
     adaptive: false
     recalibrate: false
     drift_escalation: false
@@ -50,8 +50,8 @@ strategies:
     aggregation: wt5
     calibration: prob_iso
     normalization: passthrough
-    block_threshold: 0.7447
-    flag_threshold: 0.4977
+    block_threshold: 0.0886
+    flag_threshold: 0.0443
     adaptive: true
     recalibrate: false
     drift_escalation: true
@@ -62,8 +62,8 @@ strategies:
     aggregation: p80
     calibration: prob_raw
     normalization: rank_norm
-    block_threshold: 0.9675
-    flag_threshold: 0.90
+    block_threshold: 0.8777
+    flag_threshold: 0.8338
     adaptive: false
     recalibrate: false
     drift_escalation: false
@@ -73,8 +73,8 @@ strategies:
     aggregation: wt5
     calibration: prob_iso
     normalization: passthrough
-    block_threshold: 0.7447
-    flag_threshold: 0.4977
+    block_threshold: 0.0886
+    flag_threshold: 0.0443
     adaptive: false
     recalibrate: true
     min_recal_samples: 30

@@ -1,0 +1,12 @@
+{
+  "wrapper_type": "unsupported",
+  "unsupported": true,
+  "supports_probability": false,
+  "supports_session_policy": false,
+  "supports_firewall_actions": false,
+  "required_columns": [],
+  "calibration_columns": [],
+  "source_paths": {},
+  "notes": "Unsupported stub. Exact deployable artifact and/or feature order could not be recovered during packaging. Included only to document the 21-feature experimental detector concept."
+}
+

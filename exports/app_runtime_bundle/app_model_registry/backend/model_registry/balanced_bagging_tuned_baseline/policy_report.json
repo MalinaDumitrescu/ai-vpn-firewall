@@ -1,0 +1,67 @@
+{
+  "model_id": "balanced_bagging_tuned_baseline",
+  "selected_combination": {
+    "probability_column": "prob_iso",
+    "aggregation": "wt5"
+  },
+  "thresholds": {
+    "strict": 0.8931101750021205,
+    "balanced": 0.8931101750021204
+  },
+  "test_metrics": {
+    "n_val_sessions": 120,
+    "n_test_sessions": 124,
+    "session_auc_test": 0.9679144385026739,
+    "per_dataset_session_auc_test": {
+      "iscx": 0.8088235294117647,
+      "usbvpn": 0.9333333333333333,
+      "vnat": 1.0
+    },
+    "strict": {
+      "recall": 0.18181818181818182,
+      "fpr": 0.00980392156862745,
+      "TP": 4,
+      "FP": 1,
+      "TN": 101,
+      "FN": 18
+    },
+    "balanced": {
+      "recall": 0.18181818181818182,
+      "fpr": 0.00980392156862745,
+      "TP": 4,
+      "FP": 1,
+      "TN": 101,
+      "FN": 18
+    },
+    "review_load_test": 0.00980392156862745,
+    "n_block_test": 0,
+    "n_flag_review_test": 1
+  },
+  "leakage_checks": {
+    "has_split_col": true,
+    "flow_overlap_train_val": 0,
+    "flow_overlap_train_test": 0,
+    "flow_overlap_val_test": 0,
+    "capture_overlap_train_val": 0,
+    "capture_overlap_train_test": 0,
+    "capture_overlap_val_test": 0
+  },
+  "any_overlap_detected": true,
+  "action_mapping_examples": {
+    "strict_true_balanced_true": "DISABLED_DO_NOT_BLOCK",
+    "strict_false_balanced_true": "FLAG_REVIEW",
+    "strict_false_balanced_false": "PASS"
+  },
+  "safety_flags": {
+    "strict_unsafe_for_blocking": true,
+    "balanced_review_only": false,
+    "production_readiness": false,
+    "recommended_action_mode": "simulation"
+  },
+  "wt5_verified": true,
+  "wt5_source": "src/deployment/decision_engine.py::_wt5_agg",
+  "warnings": [
+    "comparison-only, not deployment-approved"
+  ],
+  "all_combinations_csv": "reports/tables/balanced_bagging_tuned_baseline_policy_packaging_check.csv"
+}

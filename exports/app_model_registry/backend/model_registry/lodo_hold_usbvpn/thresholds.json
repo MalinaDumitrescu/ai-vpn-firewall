@@ -1,0 +1,32 @@
+{
+  "threshold_source": "recomputed_from_validation",
+  "reporting_only": true,
+  "deployable": false,
+  "supports_firewall_actions": false,
+  "selection_split": "val",
+  "evaluation_split": "test (held-out dataset: usbvpn)",
+  "session_grouping_column": "capture_id",
+  "session_aggregation": "wt5",
+  "probability_column": "prob_platt",
+  "strict": {
+    "threshold": 0.03532502841315734,
+    "target": "benign FPR == 0 on val (reporting only)",
+    "action_if_deployed": "BLOCK",
+    "safety": "block_safe_on_test (reporting only)"
+  },
+  "balanced": {
+    "threshold": 0.03532502841315734,
+    "target": "benign FPR <= 0.01 on val (reporting only)",
+    "action_if_deployed": "FLAG_REVIEW",
+    "safety": "within_fpr_budget_on_test (reporting only)"
+  },
+  "action_mapping": {
+    "strict_trigger": "BLOCK",
+    "balanced_trigger_only": "FLAG_REVIEW",
+    "no_trigger": "PASS"
+  },
+  "warnings": [
+    "Negative control / LODO stress-test model. Not deployable.",
+    "Thresholds are derived from a validation split that excludes the held-out dataset; they are NOT a deployment recommendation."
+  ]
+}

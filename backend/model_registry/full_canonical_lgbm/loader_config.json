@@ -1,0 +1,18 @@
+{
+  "model_id": "full_canonical_lgbm",
+  "source_artifact": "artifacts/final_transfer/models/full_canonical__lgbm",
+  "model_files": {
+    "lgbm": ["model.pkl"]
+  },
+  "feature_order_file": "feature_order.json",
+  "probability_column": "prob",
+  "session_grouping_column": "capture_id",
+  "session_aggregation": "mean",
+  "open_set_thresholds": {
+    "review_threshold": 0.027090,
+    "block_threshold": 0.165365,
+    "source_split": "val",
+    "simulation_only": true
+  },
+  "note": "Single LightGBM model. Feature order from artifacts/final_transfer/models/full_canonical__lgbm/feature_order.json."
+}

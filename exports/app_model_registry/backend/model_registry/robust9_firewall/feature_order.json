@@ -1,0 +1,16 @@
+{
+  "feature_order": [
+    "sz_all_mean",
+    "sz_cv",
+    "sz_all_p25",
+    "sz_all_median",
+    "sz_all_p75",
+    "sz_mean_max",
+    "sz_mean_min",
+    "sz_std_max",
+    "sz_std_min"
+  ],
+  "n_features": 9,
+  "recovered_from": "model_cat_bag0.pkl",
+  "method": "Loaded from CatBoost/XGB/LGBM model attribute (feature_names_/feature_name_/feature_names_in_)."
+}

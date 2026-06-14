@@ -1,0 +1,37 @@
+{
+  "model_id": "lodo_hold_usbvpn",
+  "source_artifact": "artifacts/lood_firewall_tuned/hold_usbvpn",
+  "packaged_utc": "2026-05-23T13:12:53.305464+00:00",
+  "role": "negative_control",
+  "deployable": false,
+  "supports_firewall_actions": false,
+  "package_files": {
+    "model_card": "model_card.json",
+    "loader_config": "loader_config.json",
+    "feature_order": "feature_order.json",
+    "calibration_info": "calibration_info.json",
+    "thresholds": "thresholds.json",
+    "session_metrics": "session_metrics.json",
+    "policy_report": "policy_report.json"
+  },
+  "source_artifact_file_sha256": {
+    "isotonic_calibrator.pkl": "9b9393d0531154422984ad647b233df5a51b987971d48997e7111d2d4e73fc41",
+    "lodo_summary.json": "fb776b10c81f65119b38e0ead04f70f72a373e0ebce5ed7a007b14247bbc3eaa",
+    "metrics.json": "48967d257a448b00284cf71314f49b2b6a51ebaaf8ad54f6657ce32568295576",
+    "model_cat_bag0.pkl": "fdedae983d2a10cb364b746c208c3c11cf88d40b1f324c3bedf651dfb1ed4710",
+    "model_cat_bag1.pkl": "43073a2f15841b2f94b28df0e3862a9798b162ad0695710e2dffcc52f3223e22",
+    "model_cat_bag2.pkl": "b10c9ad3d702ae19d2f7c6a11819da4d50f099fce88a53252f02113a30e162fd",
+    "model_lgbm_bag0.pkl": "d9db225a5f2a4803e68d6396abdfc243160a369ad715db272418d9fe6d727da2",
+    "model_lgbm_bag1.pkl": "43473ff0b2626ccc0b2223b8c3c9415646e4018fb393aef5625c7dc6a8502256",
+    "model_lgbm_bag2.pkl": "96aced3f903010d1b3118900b18f5796fe17cf918b5d6d1acfa9757c5946fae8",
+    "model_xgb_bag0.pkl": "90af4a5c164d8eb976cec8e2d613107fcda6168e1aca8d2a3348fc5912f1a24e",
+    "model_xgb_bag1.pkl": "67723fe443f064d92bddcf12603b245ad77ddc05d6710f1b96445bf54f5a88ec",
+    "model_xgb_bag2.pkl": "f8ced7d3ba1f58bedb3c02fcbf9a28955a137a50fee0d763aec9698045d8fcfc",
+    "platt_calibrator.pkl": "1d0bd20f672e343fa9e89cb9b083019cc7a93e6bfc445c0754fb1117142c3ef2",
+    "predictions.csv": "6aca0336970dfb9209c82a2361d22018d05e1ed76b0f93180e1c8e6d95ef1216"
+  },
+  "policy_utils_version": {
+    "wt5_verified": true,
+    "wt5_source": "src/deployment/decision_engine.py::_wt5_agg"
+  }
+}

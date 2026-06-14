@@ -1,0 +1,6 @@
+{
+  "model_id": "full_canonical_lgbm",
+  "calibration_method": "none",
+  "probability_column": "prob",
+  "note": "full_canonical__lgbm outputs raw LightGBM probabilities. No isotonic/platt calibrator applied in the final_transfer pipeline."
+}

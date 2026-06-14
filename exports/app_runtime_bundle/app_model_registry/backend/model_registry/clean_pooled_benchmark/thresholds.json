@@ -1,0 +1,26 @@
+{
+  "threshold_source": "recomputed_from_validation",
+  "selection_split": "val",
+  "evaluation_split": "test",
+  "session_grouping_column": "capture_id",
+  "session_aggregation": "p80",
+  "probability_column": "ensemble_score",
+  "strict": {
+    "threshold": 0.10278490276532272,
+    "target": "benign FPR == 0 on val",
+    "action": "DISABLED_DO_NOT_BLOCK",
+    "safety": "unsafe_for_blocking",
+    "reporting_only": true
+  },
+  "balanced": {
+    "threshold": 0.9508673713594167,
+    "target": "benign FPR <= 0.01 on val",
+    "action": "FLAG_REVIEW",
+    "safety": "within_fpr_budget_on_test"
+  },
+  "action_mapping": {
+    "strict_trigger": "BLOCK",
+    "balanced_trigger_only": "FLAG_REVIEW",
+    "no_trigger": "PASS"
+  }
+}

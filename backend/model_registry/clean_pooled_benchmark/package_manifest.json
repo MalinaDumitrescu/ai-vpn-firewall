@@ -1,0 +1,27 @@
+{
+  "model_id": "clean_pooled_benchmark",
+  "source_artifact": "artifacts/clean_pipeline/models",
+  "packaged_utc": "2026-05-23T13:08:56.440600+00:00",
+  "package_files": {
+    "model_card": "model_card.json",
+    "loader_config": "loader_config.json",
+    "feature_order": "feature_order.json",
+    "calibration_info": "calibration_info.json",
+    "thresholds": "thresholds.json",
+    "session_metrics": "session_metrics.json",
+    "policy_report": "policy_report.json"
+  },
+  "source_artifact_file_sha256": {
+    "cb_model.pkl": "ca63d855141064f406557c5563793d2a24a4b2cdc422b15f8ae742bc8461614d",
+    "domain_detector_results.json": "f5303a92365bb491b0267e7bba8001538f5f5fbc383223dcf4842bb53e601af1",
+    "evaluation_report.json": "2f3f335587a430bdf20a65f4026aafca531e4894ba96fbc11c67d24a9cb29430",
+    "lgb_model.pkl": "2899a1857aebd23ed090ea8eaa864a3c89d8c51fcfd6b9a4b55cf1c0833902cc",
+    "test_predictions.parquet": "563ed0d02a6d3799067642bcbd686bc6c7fd0f06f1aa3e6c59c6b963d4158b07",
+    "val_predictions.parquet": "6df049a34de4f7b4011f3736e682580e93a90a139592126616b42fc7a4d0dda8",
+    "xgb_model.pkl": "2abb5cb8fe9d604c034f0690ca971dd501ff852528695cc6f9b43e29ee0d3bbf"
+  },
+  "policy_utils_version": {
+    "wt5_verified": true,
+    "wt5_source": "src/deployment/decision_engine.py::_wt5_agg"
+  }
+}

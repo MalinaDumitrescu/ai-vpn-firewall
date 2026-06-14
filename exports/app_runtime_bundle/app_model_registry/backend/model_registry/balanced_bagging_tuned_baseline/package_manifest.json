@@ -1,0 +1,33 @@
+{
+  "model_id": "balanced_bagging_tuned_baseline",
+  "source_artifact": "artifacts/balanced_bagging_tuned",
+  "packaged_utc": "2026-05-26T07:57:32.235218+00:00",
+  "package_files": {
+    "model_card": "model_card.json",
+    "loader_config": "loader_config.json",
+    "feature_order": "feature_order.json",
+    "calibration_info": "calibration_info.json",
+    "thresholds": "thresholds.json",
+    "session_metrics": "session_metrics.json",
+    "policy_report": "policy_report.json"
+  },
+  "source_artifact_file_sha256": {
+    "isotonic_calibrator.pkl": "5dc07990b5dd31c4f983e2686ab8dcab7eeb9abc16cc607f98bf5618ff9065b9",
+    "metrics.json": "874b7b177a6dd3b6efed0cafcc66e27fb125c23b51f60245d949eddee7d76ce4",
+    "model_cat_bag0.pkl": "41ea5cd11704456f340f9cfde303a6387a18bd757ee1add33485648e97fe04dc",
+    "model_cat_bag1.pkl": "dc5066f529b10a25e680bb2fae239ec88679e232610a4bc6c645715bbd309c6e",
+    "model_cat_bag2.pkl": "a3aa46c4fd96205662d6fa6feb1b15333e3a2a94de5f5a9e0ec2c56ec41a1623",
+    "model_lgbm_bag0.pkl": "caa28f0884d519333ce8fd413406b4f97c72c7e6a3b16e750c1879143664c3f2",
+    "model_lgbm_bag1.pkl": "975a706cb67b0dad68ec70ddb15b8b653f31b2b6558e88ff2fe2332f338ddd1c",
+    "model_lgbm_bag2.pkl": "2f9b851e04e3125ad5f44b276efffc3ae0369efd035ffacc4c8588075535a72c",
+    "model_xgb_bag0.pkl": "c2bd5146b09281eb4cdd3a087831a3280180a8beeba9ddf458663f023fa9d49a",
+    "model_xgb_bag1.pkl": "12e89f0f68fba4be3610c338b23e1c3be73439881f5bc00d22465ada2923a43a",
+    "model_xgb_bag2.pkl": "eb403c57d45b2f1d2ce1d362c8e57f08af8c2d8ebc815aad1c356883fb10f5bb",
+    "platt_calibrator.pkl": "ab6819c4b1119cd81aac22ee1c6ab400cb3e31b291c110d3d61afa8b0c3b10ec",
+    "predictions.csv": "23687dbbb19fd465bc16e262065068aa8f8b35db56dc1c121e1ece9cf3951b72"
+  },
+  "policy_utils_version": {
+    "wt5_verified": true,
+    "wt5_source": "src/deployment/decision_engine.py::_wt5_agg"
+  }
+}

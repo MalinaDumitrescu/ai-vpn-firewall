@@ -1,0 +1,14 @@
+{
+  "isotonic_calibrator_file": "isotonic_calibrator.pkl",
+  "platt_calibrator_file": "platt_calibrator.pkl",
+  "selected_probability_column": "prob_platt",
+  "available_probability_columns": [
+    "prob_raw",
+    "prob_iso",
+    "prob_platt"
+  ],
+  "selection_rationale": "Reported for stress-test only; no deployment decision implied.",
+  "calibration_source_metrics_from_artifact": "artifacts/lood_firewall_tuned/hold_usbvpn/metrics.json",
+  "deployable": false,
+  "supports_firewall_actions": false
+}

@@ -1,0 +1,52 @@
+{
+  "wrapper_type": "diverse_bagging_ensemble_with_calibration",
+  "model_id": "robust13_comparison",
+  "bundle_layout": "runtime_models/<model_id>/",
+  "family_scope": "xgb_lgbm_cat",
+  "model_files": {
+    "xgb": [
+      "runtime_models/robust13_comparison/model_xgb_bag0.pkl",
+      "runtime_models/robust13_comparison/model_xgb_bag1.pkl",
+      "runtime_models/robust13_comparison/model_xgb_bag2.pkl"
+    ],
+    "lgbm": [
+      "runtime_models/robust13_comparison/model_lgbm_bag0.pkl",
+      "runtime_models/robust13_comparison/model_lgbm_bag1.pkl",
+      "runtime_models/robust13_comparison/model_lgbm_bag2.pkl"
+    ],
+    "cat": [
+      "runtime_models/robust13_comparison/model_cat_bag0.pkl",
+      "runtime_models/robust13_comparison/model_cat_bag1.pkl",
+      "runtime_models/robust13_comparison/model_cat_bag2.pkl"
+    ]
+  },
+  "calibrators": {
+    "isotonic": "runtime_models/robust13_comparison/isotonic_calibrator.pkl",
+    "platt": "runtime_models/robust13_comparison/platt_calibrator.pkl"
+  },
+  "ensemble_weights": {
+    "xgb": 0.3333333333333333,
+    "lgbm": 0.3333333333333333,
+    "cat": 0.3333333333333333
+  },
+  "feature_order_file": "runtime_models/robust13_comparison/feature_order.json",
+  "thresholds_file": "runtime_models/robust13_comparison/thresholds.json",
+  "model_card_file": "runtime_models/robust13_comparison/model_card.json",
+  "policy_report_file": "runtime_models/robust13_comparison/policy_report.json",
+  "session_metrics_file": "runtime_models/robust13_comparison/session_metrics.json",
+  "calibration_info_file": "runtime_models/robust13_comparison/calibration_info.json",
+  "probability_column": "prob_platt",
+  "session_grouping_column": "capture_id",
+  "session_aggregation": "wt5",
+  "wt5_source": "src/deployment/decision_engine.py::_wt5_agg",
+  "registry_reference": "app_model_registry/backend/model_registry/registry.json",
+  "supports_firewall_actions": false,
+  "supports_live_mode": false,
+  "recommended_action_mode": "simulation",
+  "production_readiness": false,
+  "notes": [
+    "All paths are RELATIVE to the runtime bundle root.",
+    "Only robust9_firewall is the default firewall model.",
+    "Comparison models are simulation-only CSV evaluation models."
+  ]
+}

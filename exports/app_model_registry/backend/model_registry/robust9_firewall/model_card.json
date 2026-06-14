@@ -1,0 +1,41 @@
+{
+  "model_id": "robust9_firewall",
+  "display_name": "Robust9 Diverse-Bagging Ensemble (XGB+LGBM+CatBoost)",
+  "source_artifact": "artifacts/ensemble/diverse_bagging_robust9",
+  "created_utc": "2026-05-23T12:59:07.322570+00:00",
+  "training": {
+    "retrained_in_packaging": false,
+    "note": "Packaging is read-only; thresholds/metrics derived from existing predictions.csv."
+  },
+  "ensemble": {
+    "families": [
+      "xgboost",
+      "lightgbm",
+      "catboost"
+    ],
+    "bags_per_family": 3
+  },
+  "calibrators": {
+    "isotonic": "isotonic_calibrator.pkl",
+    "platt": "platt_calibrator.pkl"
+  },
+  "probability_columns_available": [
+    "prob_raw",
+    "prob_iso",
+    "prob_platt"
+  ],
+  "selected_probability_column": "prob_iso",
+  "selected_aggregation": "p80",
+  "session_grouping_column": "capture_id",
+  "intended_use": "VPN/benign session-level firewall scoring for the FastAPI+React demo app.",
+  "recommended_action_mode": "simulation",
+  "production_readiness": false,
+  "production_readiness_note": "Simulation mode only. Strict policy is block-safe only if strict_test_fpr==0.",
+  "ui_group": "main_demo_comparison",
+  "ui_visible_main": true,
+  "ui_selectable_for_comparison": true,
+  "ui_selectable_for_firewall_inference": true,
+  "ui_badge": "Default known-domain prototype",
+  "ui_warning": "Simulation-only default model. Strong known-domain performance, not production-ready.",
+  "ui_sort_order": 1
+}

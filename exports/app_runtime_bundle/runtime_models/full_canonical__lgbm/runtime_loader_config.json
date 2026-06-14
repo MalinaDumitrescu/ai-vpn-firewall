@@ -1,0 +1,39 @@
+{
+  "wrapper_type": "single_lgbm_with_isotonic_calibration",
+  "model_id": "full_canonical__lgbm",
+  "bundle_layout": "runtime_models/<model_id>/",
+  "model_file": "runtime_models/full_canonical__lgbm/model.pkl",
+  "calibrator_file": "runtime_models/full_canonical__lgbm/calibrator.pkl",
+  "calibrator_wrapper_file": "runtime_models/full_canonical__lgbm/calibrator_wrapper.pkl",
+  "feature_order_file": "runtime_models/full_canonical__lgbm/feature_order.json",
+  "feature_family_file": "runtime_models/full_canonical__lgbm/feature_family.json",
+  "extractor_config_file": "runtime_models/full_canonical__lgbm/extractor_config.json",
+  "thresholds_file": "runtime_models/full_canonical__lgbm/thresholds.json",
+  "model_card_file": "runtime_models/full_canonical__lgbm/model_card.json",
+  "policy_report_file": "runtime_models/full_canonical__lgbm/policy_report.json",
+  "session_metrics_file": "runtime_models/full_canonical__lgbm/session_metrics.json",
+  "probability_column": "prob",
+  "probability_column_note": "Raw LightGBM output probability (not isotonic-calibrated). Three-tier policy thresholds are tuned to raw scores.",
+  "session_grouping_column": "capture_id",
+  "session_aggregation": "mean",
+  "session_aggregation_note": "Mean of per-flow raw probabilities within each capture.",
+  "registry_reference": "app_model_registry/backend/model_registry/registry.json",
+  "supports_firewall_actions": true,
+  "supports_live_mode": false,
+  "recommended_action_mode": "simulation",
+  "production_readiness": false,
+  "action_tiers": {
+    "PASS": "score < 0.027090",
+    "FLAG_REVIEW": "0.027090 <= score < 0.165365",
+    "SIMULATED_BLOCK": "score >= 0.165365"
+  },
+  "notes": [
+    "All paths are RELATIVE to the runtime bundle root.",
+    "This is the final recommended firewall model (full_canonical__lgbm).",
+    "Three-tier open-set policy: PASS / FLAG_REVIEW / SIMULATED_BLOCK.",
+    "No real packets are blocked. Simulation-only prototype.",
+    "domain_auc=1.0 \u2014 known-domain only. Not production-ready.",
+    "LODO-min AUC = 0.6164 \u2014 moderate cross-dataset transfer.",
+    "rewrote_paths = True \u2014 paths are relative to bundle root."
+  ]
+}

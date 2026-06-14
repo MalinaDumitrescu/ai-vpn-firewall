@@ -1,0 +1,178 @@
+{
+  "row_count": 351,
+  "capture_count": 7,
+  "session_count": 7,
+  "flow_label_counts": {
+    "VPN": 238,
+    "NONVPN": 113
+  },
+  "selected_captures": {
+    "TP": [
+      "vpn_vpn_hangouts_chat1b.pcap",
+      "vpn_vpn_ftps_a.pcap",
+      "vpn_vpn_aim_chat1b.pcap"
+    ],
+    "TN": [
+      "nonvpn_sftp_down_3a.pcap",
+      "nonvpn_sftpdown2.pcap",
+      "non_streaming__chunk_0447"
+    ],
+    "FN": [
+      "vpn_vpn_voipbuster1a.pcap"
+    ]
+  },
+  "capture_id_present": true,
+  "notebook_outcome_breakdown_full_test": {
+    "TN": 102,
+    "TP": 15,
+    "FP": 5,
+    "FN": 2
+  },
+  "per_capture_notebook_p80": {
+    "non_streaming__chunk_0447": {
+      "dataset": "usbvpn",
+      "label": 0,
+      "n_flows_notebook": 94,
+      "n_flows_csv": 94,
+      "p80_iso_notebook": 0.002825,
+      "mean_iso_notebook": 0.009049,
+      "outcome_notebook": "TN",
+      "decision_notebook": "PASS"
+    },
+    "nonvpn_sftp_down_3a.pcap": {
+      "dataset": "iscx",
+      "label": 0,
+      "n_flows_notebook": 14,
+      "n_flows_csv": 14,
+      "p80_iso_notebook": 0.0,
+      "mean_iso_notebook": 0.071643,
+      "outcome_notebook": "TN",
+      "decision_notebook": "PASS"
+    },
+    "nonvpn_sftpdown2.pcap": {
+      "dataset": "iscx",
+      "label": 0,
+      "n_flows_notebook": 5,
+      "n_flows_csv": 5,
+      "p80_iso_notebook": 0.000565,
+      "mean_iso_notebook": 0.000565,
+      "outcome_notebook": "TN",
+      "decision_notebook": "PASS"
+    },
+    "vpn_vpn_aim_chat1b.pcap": {
+      "dataset": "iscx",
+      "label": 1,
+      "n_flows_notebook": 6,
+      "n_flows_csv": 6,
+      "p80_iso_notebook": 0.964912,
+      "mean_iso_notebook": 0.899332,
+      "outcome_notebook": "TP",
+      "decision_notebook": "BLOCK"
+    },
+    "vpn_vpn_ftps_a.pcap": {
+      "dataset": "iscx",
+      "label": 1,
+      "n_flows_notebook": 112,
+      "n_flows_csv": 112,
+      "p80_iso_notebook": 0.991736,
+      "mean_iso_notebook": 0.654826,
+      "outcome_notebook": "TP",
+      "decision_notebook": "BLOCK"
+    },
+    "vpn_vpn_hangouts_chat1b.pcap": {
+      "dataset": "iscx",
+      "label": 1,
+      "n_flows_notebook": 62,
+      "n_flows_csv": 62,
+      "p80_iso_notebook": 1.0,
+      "mean_iso_notebook": 0.831486,
+      "outcome_notebook": "TP",
+      "decision_notebook": "BLOCK"
+    },
+    "vpn_vpn_voipbuster1a.pcap": {
+      "dataset": "iscx",
+      "label": 1,
+      "n_flows_notebook": 58,
+      "n_flows_csv": 58,
+      "p80_iso_notebook": 0.217687,
+      "mean_iso_notebook": 0.096934,
+      "outcome_notebook": "FN",
+      "decision_notebook": "PASS"
+    }
+  },
+  "mixed_label_capture_count": 0,
+  "mixed_label_session_count": 0,
+  "all_zero_feature_row_count": 0,
+  "flows_per_capture": {
+    "min": 5,
+    "median": 58,
+    "max": 112
+  },
+  "capture_label_counts": {
+    "VPN": 4,
+    "NONVPN": 3
+  },
+  "runtime_verification": {
+    "available": true,
+    "captures": [
+      {
+        "capture_id": "non_streaming__chunk_0447",
+        "notebook_outcome": "TN",
+        "notebook_decision": "PASS",
+        "runtime_decision": "PASS",
+        "runtime_p80_iso": 0.15,
+        "decisions_match": true
+      },
+      {
+        "capture_id": "nonvpn_sftp_down_3a.pcap",
+        "notebook_outcome": "TN",
+        "notebook_decision": "PASS",
+        "runtime_decision": "PASS",
+        "runtime_p80_iso": 0.217687,
+        "decisions_match": true
+      },
+      {
+        "capture_id": "nonvpn_sftpdown2.pcap",
+        "notebook_outcome": "TN",
+        "notebook_decision": "PASS",
+        "runtime_decision": "PASS",
+        "runtime_p80_iso": 0.155053,
+        "decisions_match": true
+      },
+      {
+        "capture_id": "vpn_vpn_aim_chat1b.pcap",
+        "notebook_outcome": "TP",
+        "notebook_decision": "BLOCK",
+        "runtime_decision": "PASS",
+        "runtime_p80_iso": 0.217687,
+        "decisions_match": false
+      },
+      {
+        "capture_id": "vpn_vpn_ftps_a.pcap",
+        "notebook_outcome": "TP",
+        "notebook_decision": "BLOCK",
+        "runtime_decision": "PASS",
+        "runtime_p80_iso": 0.160714,
+        "decisions_match": false
+      },
+      {
+        "capture_id": "vpn_vpn_hangouts_chat1b.pcap",
+        "notebook_outcome": "TP",
+        "notebook_decision": "BLOCK",
+        "runtime_decision": "PASS",
+        "runtime_p80_iso": 0.139394,
+        "decisions_match": false
+      },
+      {
+        "capture_id": "vpn_vpn_voipbuster1a.pcap",
+        "notebook_outcome": "FN",
+        "notebook_decision": "PASS",
+        "runtime_decision": "PASS",
+        "runtime_p80_iso": 0.217687,
+        "decisions_match": true
+      }
+    ],
+    "decisions_match": 4,
+    "decisions_total": 7
+  }
+}

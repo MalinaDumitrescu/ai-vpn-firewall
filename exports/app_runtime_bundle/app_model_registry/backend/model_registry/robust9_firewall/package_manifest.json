@@ -1,0 +1,34 @@
+{
+  "model_id": "robust9_firewall",
+  "source_artifact": "artifacts/ensemble/diverse_bagging_robust9",
+  "packaged_utc": "2026-05-23T12:59:07.322570+00:00",
+  "package_files": {
+    "model_card": "model_card.json",
+    "loader_config": "loader_config.json",
+    "feature_order": "feature_order.json",
+    "calibration_info": "calibration_info.json",
+    "thresholds": "thresholds.json",
+    "session_metrics": "session_metrics.json",
+    "policy_report": "policy_report.json"
+  },
+  "source_artifact_file_sha256": {
+    "isotonic_calibrator.pkl": "6c1204b12ca692a916f6413d46f8aa4db83b219728543411dc465e80a5adfcbb",
+    "metrics.json": "cecc59907d91ce9f62ae757a6af1ef05aa56b4686a9d2a47a33af3e78b6307e9",
+    "model_cat_bag0.pkl": "3425de7da5e392e5f406104a54a33a6917e0b9f3c0cac32fbdd80c7993d98b20",
+    "model_cat_bag1.pkl": "831a709e149d709c04cde1e3c1ffe4b147cd73399faad7a20e8fa4b552d7bdf8",
+    "model_cat_bag2.pkl": "bd337203f3012daf30874e5e6023ef540cd64156af783bb238c2d800cabd3e87",
+    "model_lgbm_bag0.pkl": "0148c0e94d264f7fefd24e69e323f9e79f3b7657d40f7fb9c5ebb0c948d0710d",
+    "model_lgbm_bag1.pkl": "5c90133b4c8a48fb99e4e32bc2154d7cec8aa0b9b480813d6cfe99aa87fc1034",
+    "model_lgbm_bag2.pkl": "6ef661edd49c33416ee3e50358fae8c7b978ca328521f42560634920e3258a2c",
+    "model_xgb_bag0.pkl": "7d349625ef12d6088dde6e87c7e4fe992ed388cef185fb972f6c05e05f09473b",
+    "model_xgb_bag1.pkl": "382ca41dbee5d91941089c13149efbcc66610ce2768b54737955107e1f70ef10",
+    "model_xgb_bag2.pkl": "7629d00cc8cf8eb30bae44cd2a940ac0cf4ee195e48e76b1712e31eddaaef244",
+    "platt_calibrator.pkl": "a07dc1ce2e73e50e31cd05f8d750ed0c0080bf37f3ccc9a9c612e5b08a26b9fe",
+    "predictions.csv": "c04f6f1437a552c351a82165942ee1b2694e0174f0705d85619bf11aad30b994"
+  },
+  "policy_utils_version": {
+    "wt5_verified": true,
+    "wt5_source": "src/deployment/decision_engine.py::_wt5_agg",
+    "sanity_check_csv": "reports/tables/policy_utils_sanity_check.csv"
+  }
+}

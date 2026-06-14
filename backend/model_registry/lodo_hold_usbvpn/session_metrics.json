@@ -1,0 +1,28 @@
+{
+  "held_out_dataset": "usbvpn",
+  "holdout_isolated_in_test_split": true,
+  "n_val_sessions": 29,
+  "n_test_sessions": 504,
+  "session_auc_test": 0.8134321612582481,
+  "per_dataset_session_auc_test": {
+    "usbvpn": 0.8134321612582481
+  },
+  "strict": {
+    "recall": 0.043478260869565216,
+    "fpr": 0.0,
+    "TP": 1,
+    "FP": 0,
+    "TN": 481,
+    "FN": 22
+  },
+  "balanced": {
+    "recall": 0.043478260869565216,
+    "fpr": 0.0,
+    "TP": 1,
+    "FP": 0,
+    "TN": 481,
+    "FN": 22
+  },
+  "reporting_only": true,
+  "deployable": false
+}

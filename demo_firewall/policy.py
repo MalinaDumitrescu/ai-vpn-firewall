@@ -35,10 +35,26 @@ logger = setup_logger(name="firewall.policy")
 # ──────────────────────────────────────────────────────
 
 class Decision(str, Enum):
-    """Firewall action decision."""
-    BLOCK = "BLOCK"      # High confidence VPN — block traffic
-    FLAG = "FLAG"        # Moderate suspicion — flag for review
-    ALLOW = "ALLOW"      # Below threshold — allow traffic
+    """
+    Firewall action decision.
+
+    Legacy two-tier values (BLOCK / FLAG / ALLOW) are preserved for
+    backward compatibility with existing callers.
+
+    The open-set three-tier policy uses FirewallAction from
+    demo_firewall.open_set_policy instead.  Mapping:
+        ALLOW  → PASS
+        FLAG   → FLAG_REVIEW
+        BLOCK  → SIMULATED_BLOCK  (simulation only — no real packet blocking)
+    """
+    BLOCK = "BLOCK"                    # Legacy: high-confidence VPN
+    FLAG = "FLAG"                      # Legacy: elevated score, flag for review
+    ALLOW = "ALLOW"                    # Legacy: below threshold, allow
+
+    # Open-set three-tier aliases (preferred for new callers)
+    SIMULATED_BLOCK = "SIMULATED_BLOCK"   # simulation only
+    FLAG_REVIEW = "FLAG_REVIEW"
+    PASS = "PASS"
 
 
 @dataclass

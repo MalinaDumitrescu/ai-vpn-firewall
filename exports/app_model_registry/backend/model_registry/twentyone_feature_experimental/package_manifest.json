@@ -1,0 +1,8 @@
+{
+  "model_id": "twentyone_feature_experimental",
+  "packaged_utc": "2026-05-23T13:08:56.440600+00:00",
+  "package_files": {
+    "model_card": "model_card.json"
+  },
+  "explanation": "No recoverable 21-feature artifact exists in the workspace. Inspected artifacts/clean_pipeline/feature_columns.json (9 features) and artifacts/features/feature_columns.json (7 features). No 21-feature model file, predictions file, or feature manifest was located. Per task constraints, no feature order is invented."
+}

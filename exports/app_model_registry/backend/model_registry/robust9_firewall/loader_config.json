@@ -1,0 +1,35 @@
+{
+  "model_id": "robust9_firewall",
+  "source_artifact": "artifacts/ensemble/diverse_bagging_robust9",
+  "model_files": {
+    "xgb": [
+      "model_xgb_bag0.pkl",
+      "model_xgb_bag1.pkl",
+      "model_xgb_bag2.pkl"
+    ],
+    "lgbm": [
+      "model_lgbm_bag0.pkl",
+      "model_lgbm_bag1.pkl",
+      "model_lgbm_bag2.pkl"
+    ],
+    "cat": [
+      "model_cat_bag0.pkl",
+      "model_cat_bag1.pkl",
+      "model_cat_bag2.pkl"
+    ]
+  },
+  "calibrators": {
+    "isotonic": "isotonic_calibrator.pkl",
+    "platt": "platt_calibrator.pkl"
+  },
+  "ensemble_weights": {
+    "xgb": 0.3333333333333333,
+    "lgbm": 0.3333333333333333,
+    "cat": 0.3333333333333333
+  },
+  "feature_order_file": "feature_order.json",
+  "probability_column": "prob_iso",
+  "session_grouping_column": "capture_id",
+  "session_aggregation": "p80",
+  "wt5_source": null
+}

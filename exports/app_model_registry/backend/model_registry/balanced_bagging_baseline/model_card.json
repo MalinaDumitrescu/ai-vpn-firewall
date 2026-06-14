@@ -1,0 +1,51 @@
+{
+  "model_id": "balanced_bagging_baseline",
+  "display_name": "Balanced Bagging Baseline (3DS, 7-feature)",
+  "source_artifact": "artifacts/balanced_bagging",
+  "created_utc": "2026-05-26T07:57:32.235218+00:00",
+  "role": "reference_candidate",
+  "training": {
+    "retrained_in_packaging": false,
+    "note": "Packaging is read-only; thresholds derived from existing predictions.csv on val and evaluated on test."
+  },
+  "ensemble": {
+    "families": [
+      "xgboost",
+      "lightgbm",
+      "catboost"
+    ],
+    "bags_per_family": 3,
+    "family_scope": "multi_family"
+  },
+  "calibrators": {
+    "isotonic": "isotonic_calibrator.pkl",
+    "platt": "platt_calibrator.pkl"
+  },
+  "feature_order": {
+    "n_features": 7,
+    "recovered_from": "model_cat_bag0.pkl"
+  },
+  "probability_columns_available": [
+    "prob_raw",
+    "prob_iso",
+    "prob_platt"
+  ],
+  "selected_probability_column": "prob_raw",
+  "selected_aggregation": "p80",
+  "session_grouping_column": "capture_id",
+  "intended_use": "Natural 3-dataset balanced bagging baseline for comparison only.",
+  "recommended_action_mode": "simulation",
+  "production_readiness": false,
+  "supports_firewall_actions": true,
+  "supports_live_mode": false,
+  "warnings": [
+    "comparison-only, not deployment-approved"
+  ],
+  "ui_group": "main_demo_comparison",
+  "ui_visible_main": true,
+  "ui_selectable_for_comparison": true,
+  "ui_selectable_for_firewall_inference": false,
+  "ui_badge": "Comparison-only",
+  "ui_warning": "Comparison-only, not deployment-approved.",
+  "ui_sort_order": 4
+}

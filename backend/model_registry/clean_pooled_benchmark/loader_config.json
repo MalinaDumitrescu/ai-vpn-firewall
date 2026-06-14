@@ -1,0 +1,30 @@
+{
+  "model_id": "clean_pooled_benchmark",
+  "source_artifact": "artifacts/clean_pipeline/models",
+  "model_files": {
+    "xgb": [
+      "xgb_model.pkl"
+    ],
+    "lgbm": [
+      "lgb_model.pkl"
+    ],
+    "cat": [
+      "cb_model.pkl"
+    ]
+  },
+  "calibrators": {
+    "isotonic": null,
+    "platt": null
+  },
+  "ensemble_weights": {
+    "xgb": 0.3333333333333333,
+    "lgbm": 0.3333333333333333,
+    "cat": 0.3333333333333333
+  },
+  "feature_order_file": "feature_order.json",
+  "probability_column": "ensemble_score",
+  "score_column_in_source_predictions": "ensemble_score",
+  "session_grouping_column": "capture_id",
+  "session_aggregation": "p80",
+  "wt5_source": null
+}

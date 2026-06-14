@@ -1,0 +1,16 @@
+{
+  "model_id": "full_canonical_lgbm",
+  "registry_dir": "backend/model_registry/full_canonical_lgbm",
+  "source_artifact": "artifacts/final_transfer/models/full_canonical__lgbm",
+  "files": [
+    "model_card.json",
+    "loader_config.json",
+    "policy_report.json",
+    "session_metrics.json",
+    "thresholds.json",
+    "calibration_info.json",
+    "feature_order.json",
+    "package_manifest.json"
+  ],
+  "created_utc": "2026-05-28T23:00:00+00:00"
+}

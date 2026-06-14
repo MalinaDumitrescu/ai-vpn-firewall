@@ -1,0 +1,16 @@
+{
+  "feature_order": [
+    "sz_coef_variation",
+    "sz_p25_median_ratio",
+    "sz_p75_median_ratio",
+    "sz_iqr_norm_median",
+    "dispersion_symmetry",
+    "direction_balance_bytes",
+    "direction_balance_packets",
+    "packet_rate",
+    "byte_rate"
+  ],
+  "n_features": 9,
+  "recovered_from": "artifacts/clean_pipeline/feature_columns.json",
+  "method": "clean_pipeline/feature_columns.json (training-time feature list)."
+}

@@ -1,0 +1,28 @@
+{
+  "generated_utc": "2026-05-26T09:27:26.556757+00:00",
+  "default_firewall_model": "robust9_firewall",
+  "groups": {
+    "main_demo_comparison": [
+      "robust9_firewall",
+      "balanced_bagging_3ds_reference",
+      "balanced_bagging_xgb_baseline",
+      "balanced_bagging_baseline",
+      "robust13_comparison",
+      "balanced_bagging_tuned_baseline"
+    ],
+    "advanced_unsafe_benchmark": [
+      "clean_pooled_benchmark",
+      "single_model_fallback"
+    ],
+    "robustness_negative_control": [
+      "lodo_hold_iscx",
+      "lodo_hold_usbvpn",
+      "lodo_hold_vnat"
+    ],
+    "hidden_alias_or_unsupported": [
+      "balanced_bagging_3ds_refresh",
+      "historical_3ds_degraded",
+      "twentyone_feature_experimental"
+    ]
+  }
+}

@@ -1,0 +1,256 @@
+{
+  "generated_utc": "2026-05-29T10:00:00.000000+00:00",
+  "note": "Dashboard configuration for the VPN firewall runtime app. All modes are simulation-only.",
+
+  "global_simulation_warning": {
+    "text": "\u26a0\ufe0f SIMULATION ONLY \u2014 No real packet blocking. All SIMULATED_BLOCK actions are audit/log events. This prototype is not production-ready.",
+    "show_on_all_pages": true,
+    "color": "red",
+    "icon": "\u26a0\ufe0f"
+  },
+
+  "dashboard": {
+    "default_model": "full_canonical_lgbm",
+    "default_model_display_id": "full_canonical__lgbm",
+    "mode": "simulation",
+    "production_ready": false,
+    "warning": "Known-domain simulation prototype. Not production-ready. Dataset fingerprinting remains unresolved.",
+    "simulation_disclaimer": "\u26a0\ufe0f SIMULATION ONLY \u2014 No real packet blocking. All SIMULATED_BLOCK actions are audit/log events.",
+
+    "status_cards": [
+      {
+        "id": "default_model_card",
+        "title": "Active Model",
+        "value": "full_canonical__lgbm",
+        "subtitle": "final_transfer \u00b7 LightGBM \u00b7 34 features",
+        "color": "blue",
+        "icon": "\u2b50",
+        "description": "Recommended simulation prototype. Capture-level evaluation."
+      },
+      {
+        "id": "mode_card",
+        "title": "Operating Mode",
+        "value": "SIMULATION",
+        "subtitle": "Open-set three-tier policy",
+        "color": "orange",
+        "icon": "\ud83d\udd2c",
+        "description": "PASS / FLAG_REVIEW / SIMULATED_BLOCK. No real blocking."
+      },
+      {
+        "id": "production_ready_card",
+        "title": "Production Ready",
+        "value": "NO",
+        "subtitle": "Known-domain prototype only",
+        "color": "red",
+        "icon": "\u26a0\ufe0f",
+        "description": "Domain AUC=1.0 (structural fingerprinting). LODO-min=0.616. Not production-ready."
+      },
+      {
+        "id": "pass_count_card",
+        "title": "PASS Count",
+        "value": "runtime",
+        "subtitle": "score < 0.027090",
+        "color": "green",
+        "icon": "\u2705",
+        "description": "Sessions with score below review threshold."
+      },
+      {
+        "id": "flag_review_count_card",
+        "title": "FLAG_REVIEW Count",
+        "value": "runtime",
+        "subtitle": "0.027090 \u2264 score < 0.165365",
+        "color": "orange",
+        "icon": "\ud83d\udd36",
+        "description": "Uncertain sessions routed to analyst queue."
+      },
+      {
+        "id": "simulated_block_count_card",
+        "title": "SIMULATED BLOCK Count",
+        "value": "runtime",
+        "subtitle": "score \u2265 0.165365",
+        "color": "red",
+        "icon": "\ud83d\udeab",
+        "description": "High-confidence VPN detections. SIMULATED BLOCK \u2014 log/alert only. No real blocking."
+      },
+      {
+        "id": "pooled_auc_card",
+        "title": "Pooled AUC",
+        "value": "0.9994",
+        "subtitle": "In-distribution test performance",
+        "color": "green",
+        "icon": "\ud83d\udcca",
+        "description": "Near-perfect in-distribution detection. Capture-level splits."
+      },
+      {
+        "id": "lodo_min_card",
+        "title": "LODO-min AUC",
+        "value": "0.6164",
+        "subtitle": "Worst-case transfer (ISCX held out)",
+        "color": "yellow",
+        "icon": "\ud83d\udd01",
+        "description": "Moderate transfer. Performance degrades significantly on unseen domains."
+      },
+      {
+        "id": "domain_auc_card",
+        "title": "Domain AUC",
+        "value": "1.000",
+        "subtitle": "Dataset fingerprinting severity",
+        "color": "red",
+        "icon": "\ud83e\uddec",
+        "description": "Model fully encodes dataset origin. Structural fingerprinting unresolved."
+      }
+    ],
+
+    "open_set_policy_display": {
+      "model_id": "full_canonical__lgbm",
+      "review_threshold": 0.027090,
+      "block_threshold": 0.165365,
+      "simulation_only": true,
+      "action_bands": [
+        {
+          "action": "PASS",
+          "range": "score < 0.027090",
+          "color": "green",
+          "icon": "\u2705",
+          "description": "Confident benign. Allow traffic.",
+          "explanation": "Score below review threshold. Traffic pattern consistent with benign baseline."
+        },
+        {
+          "action": "FLAG_REVIEW",
+          "range": "0.027090 \u2264 score < 0.165365",
+          "color": "orange",
+          "icon": "\ud83d\udd36",
+          "description": "Uncertain. Route to analyst queue. Do NOT block automatically.",
+          "explanation": "Score is uncertain; manual review recommended."
+        },
+        {
+          "action": "SIMULATED_BLOCK",
+          "range": "score \u2265 0.165365",
+          "color": "red",
+          "icon": "\ud83d\udeab",
+          "description": "High-confidence VPN. SIMULATED BLOCK \u2014 log/alert only.",
+          "explanation": "Score exceeds block threshold; simulated block recommendation. [SIMULATION ONLY \u2014 no real packet blocking.]"
+        }
+      ],
+      "simulation_notice": "No packets are blocked. All SIMULATED_BLOCK decisions are audit/log events only."
+    }
+  },
+
+  "live_vm_monitor": {
+    "title": "Live VM Monitor",
+    "model_id": "full_canonical__lgbm",
+    "action_mode": "simulation",
+    "production_ready": false,
+    "simulation_notice": "\u26a0\ufe0f SIMULATION ONLY \u2014 No packets are blocked. No real firewall actions are taken.",
+    "displayed_fields": [
+      "timestamp",
+      "capture_id",
+      "score",
+      "action",
+      "threshold_band",
+      "model_id",
+      "action_mode",
+      "explanation",
+      "n_flows",
+      "confidence_margin"
+    ],
+    "action_display": {
+      "PASS":             { "icon": "\u2705", "color": "green",  "label": "PASS" },
+      "FLAG_REVIEW":      { "icon": "\ud83d\udd36", "color": "orange", "label": "FLAG FOR REVIEW" },
+      "SIMULATED_BLOCK":  { "icon": "\ud83d\udeab", "color": "red",    "label": "SIMULATED BLOCK" }
+    },
+    "footer_notice": "This monitor shows simulation results only. No real packet blocking occurs. Model: full_canonical__lgbm. Not production-ready."
+  },
+
+  "live_vm_replay": {
+    "title": "Live VM Replay",
+    "model_id": "full_canonical__lgbm",
+    "action_mode": "simulation",
+    "production_ready": false,
+    "simulation_notice": "\u26a0\ufe0f SIMULATION ONLY \u2014 Replay of stored predictions. No packets are blocked.",
+    "displayed_fields": [
+      "timestamp",
+      "capture_id",
+      "dataset",
+      "score",
+      "action",
+      "threshold_band",
+      "model_id",
+      "action_mode",
+      "explanation",
+      "n_flows",
+      "n_flagged",
+      "n_blocked_flows",
+      "label",
+      "correct",
+      "confidence_margin"
+    ],
+    "action_display": {
+      "PASS":             { "icon": "\u2705", "color": "green",  "label": "PASS" },
+      "FLAG_REVIEW":      { "icon": "\ud83d\udd36", "color": "orange", "label": "FLAG FOR REVIEW" },
+      "SIMULATED_BLOCK":  { "icon": "\ud83d\udeab", "color": "red",    "label": "SIMULATED BLOCK" }
+    },
+    "summary_counts": ["n_pass", "n_flag_review", "n_simulated_block"],
+    "footer_notice": "Replay uses val/test split predictions only. Thresholds derived from validation data. Not production-ready."
+  },
+
+  "recent_events_table": {
+    "title": "Recent Events",
+    "max_rows": 50,
+    "model_id_column": "model_id",
+    "simulation_badge": true,
+    "simulation_notice": "All events are simulation results. No real firewall actions.",
+    "columns": [
+      { "key": "timestamp",          "label": "Time",            "sortable": true },
+      { "key": "capture_id",         "label": "Capture",         "sortable": false },
+      { "key": "dataset",            "label": "Dataset",         "sortable": true },
+      { "key": "score",              "label": "Score",           "sortable": true },
+      { "key": "action_display",     "label": "Action",          "sortable": true },
+      { "key": "threshold_band",     "label": "Threshold Band",  "sortable": false },
+      { "key": "model_id",           "label": "Model",           "sortable": false },
+      { "key": "action_mode",        "label": "Mode",            "sortable": false },
+      { "key": "explanation",        "label": "Explanation",     "sortable": false },
+      { "key": "n_flows",            "label": "Flows",           "sortable": true },
+      { "key": "confidence_margin",  "label": "Confidence",      "sortable": true },
+      { "key": "correct",            "label": "Correct?",        "sortable": true }
+    ],
+    "action_color_map": {
+      "PASS":             "green",
+      "FLAG_REVIEW":      "orange",
+      "SIMULATED_BLOCK":  "red"
+    }
+  },
+
+  "model_details": {
+    "model_id": "full_canonical__lgbm",
+    "display_name": "Full Canonical LightGBM (final_transfer)",
+    "algorithm": "LightGBM (single model)",
+    "feature_family": "full_canonical",
+    "n_features": 34,
+    "action_mode": "simulation",
+    "production_ready": false,
+    "simulation_notice": "No packets are blocked. All SIMULATED_BLOCK actions are audit/log events.",
+    "not_production_ready_notice": "This model is not production-ready. Domain AUC=1.0 confirms structural dataset fingerprinting. LODO-min=0.616 indicates limited transfer to unseen environments.",
+    "metrics": {
+      "pooled_auc": 0.9994,
+      "lodo_min_auc": 0.6164,
+      "lodo_mean_auc": 0.6531,
+      "domain_auc": 1.0,
+      "ece": 0.0026
+    },
+    "policy": {
+      "type": "open_set_three_tier",
+      "review_threshold": 0.027090,
+      "block_threshold": 0.165365,
+      "source_split": "val"
+    },
+    "badges": [
+      { "label": "\u2b50 Recommended simulation prototype", "color": "blue" },
+      { "label": "\ud83d\udd2c Simulation only",             "color": "orange" },
+      { "label": "\u274c Not production-ready",             "color": "red" },
+      { "label": "\u26a0\ufe0f Domain AUC = 1.0",           "color": "red" },
+      { "label": "\u26a0\ufe0f LODO-min = 0.616",           "color": "orange" }
+    ],
+    "legacy_model_note": "robust9_firewall is retained as a legacy baseline for comparison. It is not the recommended model."
+  }
+}

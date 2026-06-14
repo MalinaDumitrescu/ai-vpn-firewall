@@ -1,0 +1,34 @@
+{
+  "val": {
+    "n_sessions": 101,
+    "n_vpn_sessions": 1,
+    "n_benign_sessions": 100,
+    "benign_sessions_PASS": 95,
+    "benign_sessions_FLAG_REVIEW": 4,
+    "benign_sessions_SIMULATED_BLOCK": 1,
+    "vpn_sessions_PASS": 0,
+    "vpn_sessions_FLAG_REVIEW": 0,
+    "vpn_sessions_SIMULATED_BLOCK": 1,
+    "benign_block_fpr": 0.01,
+    "benign_review_fpr": 0.05,
+    "vpn_detection_rate_any_action": 1.0,
+    "review_threshold": 0.02709,
+    "block_threshold": 0.165365
+  },
+  "test": {
+    "n_sessions": 104,
+    "n_vpn_sessions": 3,
+    "n_benign_sessions": 101,
+    "benign_sessions_PASS": 99,
+    "benign_sessions_FLAG_REVIEW": 1,
+    "benign_sessions_SIMULATED_BLOCK": 1,
+    "vpn_sessions_PASS": 0,
+    "vpn_sessions_FLAG_REVIEW": 0,
+    "vpn_sessions_SIMULATED_BLOCK": 3,
+    "benign_block_fpr": 0.009900990099009901,
+    "benign_review_fpr": 0.019801980198019802,
+    "vpn_detection_rate_any_action": 1.0,
+    "review_threshold": 0.02709,
+    "block_threshold": 0.165365
+  }
+}

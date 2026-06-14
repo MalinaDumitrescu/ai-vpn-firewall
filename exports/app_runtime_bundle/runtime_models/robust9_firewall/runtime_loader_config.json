@@ -1,0 +1,51 @@
+{
+  "wrapper_type": "diverse_bagging_ensemble_with_calibration",
+  "model_id": "robust9_firewall",
+  "bundle_layout": "runtime_models/<model_id>/",
+  "model_files": {
+    "xgb": [
+      "runtime_models/robust9_firewall/model_xgb_bag0.pkl",
+      "runtime_models/robust9_firewall/model_xgb_bag1.pkl",
+      "runtime_models/robust9_firewall/model_xgb_bag2.pkl"
+    ],
+    "lgbm": [
+      "runtime_models/robust9_firewall/model_lgbm_bag0.pkl",
+      "runtime_models/robust9_firewall/model_lgbm_bag1.pkl",
+      "runtime_models/robust9_firewall/model_lgbm_bag2.pkl"
+    ],
+    "cat": [
+      "runtime_models/robust9_firewall/model_cat_bag0.pkl",
+      "runtime_models/robust9_firewall/model_cat_bag1.pkl",
+      "runtime_models/robust9_firewall/model_cat_bag2.pkl"
+    ]
+  },
+  "calibrators": {
+    "isotonic": "runtime_models/robust9_firewall/isotonic_calibrator.pkl",
+    "platt": "runtime_models/robust9_firewall/platt_calibrator.pkl"
+  },
+  "ensemble_weights": {
+    "xgb": 0.3333333333333333,
+    "lgbm": 0.3333333333333333,
+    "cat": 0.3333333333333333
+  },
+  "feature_order_file": "runtime_models/robust9_firewall/feature_order.json",
+  "thresholds_file": "runtime_models/robust9_firewall/thresholds.json",
+  "model_card_file": "runtime_models/robust9_firewall/model_card.json",
+  "policy_report_file": "runtime_models/robust9_firewall/policy_report.json",
+  "session_metrics_file": "runtime_models/robust9_firewall/session_metrics.json",
+  "calibration_info_file": "runtime_models/robust9_firewall/calibration_info.json",
+  "probability_column": "prob_iso",
+  "session_grouping_column": "capture_id",
+  "session_aggregation": "p80",
+  "wt5_source": null,
+  "registry_reference": "app_model_registry/backend/model_registry/registry.json",
+  "supports_firewall_actions": true,
+  "supports_live_mode": false,
+  "recommended_action_mode": "simulation",
+  "production_readiness": false,
+  "notes": [
+    "All paths are RELATIVE to the runtime bundle root.",
+    "Only the default firewall model (robust9_firewall) has runtime binaries in this bundle.",
+    "Other models referenced by app_model_registry are metadata/comparison-only."
+  ]
+}

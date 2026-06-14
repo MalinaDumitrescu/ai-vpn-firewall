@@ -88,4 +88,3 @@ sns.heatmap(pivot, center=0, cmap='coolwarm', annot=False)
 plt.title('Feature Sign Reversal Heatmap (SMD VPN - nonVPN)')
 plt.savefig('figures/validation/sign_reversal_heatmap.png')
 ```
-

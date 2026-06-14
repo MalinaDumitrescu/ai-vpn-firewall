@@ -36,6 +36,37 @@ research:
   flag_threshold: 0.3
   source_split: "none"
 
+open_set:
+  description: >
+    Three-tier uncertainty-aware policy for full_canonical__lgbm.
+    Reduces risky binary decisions under domain shift.
+    SIMULATED BLOCK only — no real packet blocking.
+  model_id: "full_canonical__lgbm"
+  aggregation_rule: "mean_per_capture"
+  calibration_method: "raw_prob"
+  source_split: "val"
+  simulation_only: true
+  # Thresholds derived from 100 benign validation sessions
+  review_threshold: 0.027090      # p95 benign session score  → val FPR ~5%
+  block_threshold: 0.165365       # max benign session score  → val FPR ~1%
+  actions:
+    PASS:            "score < 0.027090"
+    FLAG_REVIEW:     "0.027090 <= score < 0.165365"
+    SIMULATED_BLOCK: "score >= 0.165365  [SIMULATION ONLY]"
+  val_three_tier_result:
+    benign_PASS: 95
+    benign_FLAG_REVIEW: 4
+    benign_SIMULATED_BLOCK: 1
+    vpn_PASS: 0
+    vpn_FLAG_REVIEW: 0
+    vpn_SIMULATED_BLOCK: 1
+    block_fpr_on_val: 0.01
+    review_fpr_on_val: 0.04
+  domain_shift_rationale: >
+    Under domain shift, unknown-domain flows produce elevated but unreliable
+    scores in the [review_threshold, block_threshold] band.  FLAG_REVIEW
+    routes these for human inspection instead of automatic blocking.
+
 # Validated deployment result (from experiments):
 # tuned_ensemble_iso + p90 session aggregation
 # block_recall ≈ 0.7059

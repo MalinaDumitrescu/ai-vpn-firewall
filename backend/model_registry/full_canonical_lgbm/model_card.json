@@ -1,0 +1,49 @@
+{
+  "model_id": "full_canonical_lgbm",
+  "display_name": "Full Canonical LightGBM — Final Transfer Experiment",
+  "source_artifact": "artifacts/final_transfer/models/full_canonical__lgbm",
+  "created_utc": "2026-05-28T23:00:00.000000+00:00",
+  "training": {
+    "retrained_in_packaging": false,
+    "note": "Packaging is read-only; thresholds and metrics derived from existing val_predictions.csv and test_predictions.csv. No retraining performed.",
+    "experiment": "final_transfer",
+    "feature_family": "full_canonical",
+    "capture_level_splits": true,
+    "no_flow_level_leakage": true
+  },
+  "algorithm": {
+    "family": "lightgbm",
+    "type": "single_model",
+    "note": "Single LightGBM model, not an ensemble. Feature family: full_canonical (34 features)."
+  },
+  "feature_family": "full_canonical",
+  "n_features": 34,
+  "probability_column": "prob",
+  "session_grouping_column": "capture_id",
+  "session_aggregation": "mean",
+  "intended_use": "VPN/benign session-level firewall scoring. Best deployment-eligible prototype from the final_transfer experiment.",
+  "recommended_action_mode": "simulation",
+  "production_readiness": false,
+  "production_readiness_note": "Simulation mode only. Domain AUC=1.0 confirms structural dataset fingerprinting. Not production-ready.",
+  "open_set_policy": {
+    "type": "three_tier",
+    "review_threshold": 0.027090,
+    "block_threshold": 0.165365,
+    "actions": {
+      "PASS": "score < 0.027090",
+      "FLAG_REVIEW": "0.027090 <= score < 0.165365",
+      "SIMULATED_BLOCK": "score >= 0.165365  [SIMULATION ONLY]"
+    },
+    "simulation_only": true
+  },
+  "ui_group": "final_transfer_comparison",
+  "ui_visible_main": true,
+  "ui_selectable_for_comparison": true,
+  "ui_selectable_for_firewall_inference": true,
+  "ui_badge": "⭐ Recommended simulation prototype",
+  "ui_warning": "Simulation-only. Domain AUC=1.0 (structural fingerprinting). Not production-ready.",
+  "ui_sort_order": 0,
+  "ui_selectable_for_csv_evaluation": true,
+  "runtime_binary_exported": false,
+  "updated_utc": "2026-05-28T23:00:00.000000+00:00"
+}

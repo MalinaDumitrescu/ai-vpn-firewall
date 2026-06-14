@@ -1,0 +1,28 @@
+{
+  "held_out_dataset": "iscx",
+  "holdout_isolated_in_test_split": true,
+  "n_val_sessions": 85,
+  "n_test_sessions": 140,
+  "session_auc_test": 0.5622965374371116,
+  "per_dataset_session_auc_test": {
+    "iscx": 0.5622965374371116
+  },
+  "strict": {
+    "recall": 0.0,
+    "fpr": 0.0,
+    "TP": 0,
+    "FP": 0,
+    "TN": 109,
+    "FN": 31
+  },
+  "balanced": {
+    "recall": 0.0,
+    "fpr": 0.0,
+    "TP": 0,
+    "FP": 0,
+    "TN": 109,
+    "FN": 31
+  },
+  "reporting_only": true,
+  "deployable": false
+}

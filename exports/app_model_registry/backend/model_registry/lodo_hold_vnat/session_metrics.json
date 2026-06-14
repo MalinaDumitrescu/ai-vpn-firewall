@@ -1,0 +1,28 @@
+{
+  "held_out_dataset": "vnat",
+  "holdout_isolated_in_test_split": true,
+  "n_val_sessions": 90,
+  "n_test_sessions": 88,
+  "session_auc_test": 0.17590361445783131,
+  "per_dataset_session_auc_test": {
+    "vnat": 0.17590361445783131
+  },
+  "strict": {
+    "recall": 0.0,
+    "fpr": 0.0,
+    "TP": 0,
+    "FP": 0,
+    "TN": 83,
+    "FN": 5
+  },
+  "balanced": {
+    "recall": 0.0,
+    "fpr": 0.0,
+    "TP": 0,
+    "FP": 0,
+    "TN": 83,
+    "FN": 5
+  },
+  "reporting_only": true,
+  "deployable": false
+}

@@ -29,6 +29,7 @@ splitting:
   test_ratio: 0.15
   min_captures_per_class_per_split: 2
   splitter_version: 2      # 1 = legacy greedy, 2 = constrained (recommended)
+  fail_on_constraint_violation: true  # NEW: fail pipeline if split constraint violated
 
 scaling:
   apply_quantile_scaling: true
@@ -37,4 +38,3 @@ scaling:
 output:
   artifacts_dir: "artifacts/clean_pipeline"
   splits_dir: "data/splits"
-

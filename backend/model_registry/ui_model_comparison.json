@@ -1,0 +1,210 @@
+{
+  "generated_utc": "2026-05-29T10:00:00.000000+00:00",
+  "note": "Model comparison table configuration for the runtime app UI.",
+
+  "simulation_notice": "\u26a0\ufe0f SIMULATION ONLY \u2014 No packets are blocked. All SIMULATED_BLOCK actions are audit/log events. No model in this comparison is production-ready.",
+
+  "comparison_groups": [
+    {
+      "group_id": "final_transfer_comparison",
+      "group_label": "Final Transfer Experiment",
+      "description": "Models from the final_transfer experiment. Capture-level splits. Multi-objective evaluation. All are simulation-only prototypes.",
+      "models": [
+        {
+          "model_id": "full_canonical_lgbm",
+          "display_name": "full_canonical__lgbm",
+          "badge": "\u2b50 Recommended",
+          "status_label": "recommended",
+          "algorithm": "LightGBM",
+          "feature_family": "full_canonical",
+          "n_features": 34,
+          "pooled_auc": 0.9994,
+          "lodo_min_auc": 0.6164,
+          "lodo_mean_auc": 0.6531,
+          "domain_auc": 1.0,
+          "ece": 0.0026,
+          "recall": 0.9444,
+          "fpr": 0.0025,
+          "deployment_eligible": true,
+          "production_ready": false,
+          "policy": "open_set_three_tier",
+          "note": "Best deployment-eligible prototype. Structural fingerprinting unresolved. Simulation only.",
+          "simulation_warning": "Not production-ready. Domain AUC=1.0."
+        },
+        {
+          "model_id": "robust9_firewall",
+          "display_name": "robust9_firewall",
+          "badge": "\u2193 Legacy baseline",
+          "status_label": "baseline",
+          "algorithm": "XGB+LGBM+CatBoost (9 bags)",
+          "feature_family": "robust9",
+          "n_features": 9,
+          "pooled_auc": null,
+          "session_auc_test": 0.9991,
+          "lodo_min_auc": null,
+          "lodo_mean_auc": null,
+          "domain_auc": null,
+          "ece": null,
+          "recall": 0.9091,
+          "fpr": 0.0,
+          "deployment_eligible": true,
+          "production_ready": false,
+          "policy": "two_tier_strict",
+          "note": "Legacy baseline. No LODO/domain evaluation. Superseded by full_canonical__lgbm. Not the recommended model.",
+          "simulation_warning": "Legacy baseline. Not the recommended model."
+        },
+        {
+          "model_id": "robust9_clean",
+          "display_name": "robust9_clean (clean-split variant)",
+          "badge": "\u2193 Baseline variant",
+          "status_label": "baseline",
+          "algorithm": "XGB+LGBM+CatBoost (9 bags)",
+          "feature_family": "robust9",
+          "n_features": 9,
+          "pooled_auc": null,
+          "session_auc_test": null,
+          "lodo_min_auc": null,
+          "lodo_mean_auc": null,
+          "domain_auc": null,
+          "ece": null,
+          "recall": null,
+          "fpr": null,
+          "deployment_eligible": false,
+          "production_ready": false,
+          "policy": "two_tier_strict",
+          "note": "Comparison-only variant of robust9. References robust9_firewall artifact under clean validation splits. No separate binary.",
+          "simulation_warning": "Comparison-only. Not the recommended model."
+        },
+        {
+          "model_id": "timing_shape_lgbm",
+          "display_name": "timing_shape__lgbm",
+          "badge": "\ud83d\udd2c Diagnostic",
+          "status_label": "diagnostic",
+          "algorithm": "LightGBM",
+          "feature_family": "timing_shape",
+          "n_features": 5,
+          "pooled_auc": 0.9423,
+          "lodo_min_auc": 0.4512,
+          "lodo_mean_auc": 0.4756,
+          "domain_auc": 0.9891,
+          "ece": 0.0098,
+          "recall": 0.1197,
+          "fpr": 0.004,
+          "deployment_eligible": true,
+          "production_ready": false,
+          "policy": "two_tier_standard",
+          "note": "Low-fingerprint diagnostic. Lower domain_auc but also lower detection performance. Comparison only.",
+          "simulation_warning": "Diagnostic only. Not the recommended model."
+        }
+      ]
+    },
+    {
+      "group_id": "dann_research",
+      "group_label": "Anti-Fingerprinting Research (Research Only)",
+      "description": "Research/diagnostic experiments targeting domain fingerprinting. Not deployment-eligible. No production use.",
+      "models": [
+        {
+          "model_id": "dann_research",
+          "display_name": "DANN v2 (best config)",
+          "badge": "\ud83d\udd2c Research only",
+          "status_label": "research-only",
+          "algorithm": "DANN (GRL + encoder + domain head)",
+          "feature_family": "full_canonical",
+          "n_features": 34,
+          "pooled_auc": "see dann_results.csv",
+          "lodo_min_auc": null,
+          "lodo_mean_auc": null,
+          "domain_auc": null,
+          "embedding_domain_auc": 1.0,
+          "domain_reduction": 0.0003,
+          "deployment_eligible": false,
+          "production_ready": false,
+          "policy": "none",
+          "note": "21 configs tested. embedding_domain_auc remained ~1.0 despite lambda up to 5.0. Dataset fingerprinting is structural.",
+          "simulation_warning": "Research only. Not deployment-eligible. Not production-ready."
+        },
+        {
+          "model_id": "anti_fingerprint_hybrid",
+          "display_name": "Anti-fingerprint Hybrid (research)",
+          "badge": "\ud83d\udd2c Research only",
+          "status_label": "research-only",
+          "algorithm": "Hybrid (not specified)",
+          "feature_family": "full_canonical",
+          "n_features": 34,
+          "pooled_auc": null,
+          "lodo_min_auc": null,
+          "lodo_mean_auc": null,
+          "domain_auc": null,
+          "deployment_eligible": false,
+          "production_ready": false,
+          "policy": "none",
+          "note": "Placeholder for anti-fingerprinting hybrid research. No deployable artifact. No LODO evaluation.",
+          "simulation_warning": "Research only. No deployable artifact. Not production-ready."
+        }
+      ]
+    },
+    {
+      "group_id": "main_demo_comparison",
+      "group_label": "Historical Demo Baselines",
+      "description": "Earlier ensemble baselines from before the final_transfer experiment. Retained for comparison.",
+      "models": [
+        {
+          "model_id": "balanced_bagging_3ds_reference",
+          "display_name": "3DS Ensemble Reference",
+          "badge": "Comparison-only",
+          "status_label": "baseline",
+          "session_auc_test": 0.9505,
+          "deployment_eligible": false,
+          "production_ready": false,
+          "note": "Comparison-only. Not deployment-approved."
+        },
+        {
+          "model_id": "balanced_bagging_xgb_baseline",
+          "display_name": "XGB Bagging Baseline",
+          "badge": "Comparison-only",
+          "status_label": "baseline",
+          "session_auc_test": 0.9710,
+          "deployment_eligible": false,
+          "production_ready": false,
+          "note": "XGBoost-only family. Comparison-only."
+        },
+        {
+          "model_id": "robust13_comparison",
+          "display_name": "Robust13 Comparison",
+          "badge": "Comparison-only",
+          "status_label": "baseline",
+          "session_auc_test": 0.9389,
+          "deployment_eligible": false,
+          "production_ready": false,
+          "note": "12-feature ensemble (artifact name says 13). Comparison-only."
+        }
+      ]
+    }
+  ],
+
+  "comparison_columns": [
+    {"key": "display_name",        "label": "Model",              "sortable": true},
+    {"key": "badge",               "label": "Status",             "sortable": false},
+    {"key": "status_label",        "label": "Role",               "sortable": true},
+    {"key": "algorithm",           "label": "Algorithm",          "sortable": false},
+    {"key": "n_features",          "label": "# Features",         "sortable": true},
+    {"key": "pooled_auc",          "label": "Pooled AUC",         "sortable": true, "highlight_max": true},
+    {"key": "lodo_min_auc",        "label": "LODO-min AUC",       "sortable": true, "highlight_max": true},
+    {"key": "domain_auc",          "label": "Domain AUC",         "sortable": true, "highlight_min": true},
+    {"key": "ece",                 "label": "ECE",                "sortable": true, "highlight_min": true},
+    {"key": "recall",              "label": "Recall",             "sortable": true},
+    {"key": "fpr",                 "label": "FPR",                "sortable": true, "highlight_min": true},
+    {"key": "deployment_eligible", "label": "Deploy-Eligible",    "sortable": true},
+    {"key": "production_ready",    "label": "Prod-Ready",         "sortable": true},
+    {"key": "policy",              "label": "Policy",             "sortable": false},
+    {"key": "note",                "label": "Notes",              "sortable": false}
+  ],
+
+  "status_label_legend": {
+    "recommended":    "Best deployment-eligible simulation prototype. Use this for demo.",
+    "baseline":       "Legacy or earlier-generation baseline for comparison only.",
+    "diagnostic":     "Low-fingerprint diagnostic. Lower AUC. Not recommended for deployment.",
+    "research-only":  "Research experiments. No deployable artifact. Not production-ready.",
+    "not production-ready": "All models in this registry are simulation-only prototypes."
+  }
+}

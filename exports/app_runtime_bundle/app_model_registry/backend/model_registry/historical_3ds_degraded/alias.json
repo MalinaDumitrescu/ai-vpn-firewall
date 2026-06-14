@@ -1,0 +1,14 @@
+{
+  "alias_id": "historical_3ds_degraded",
+  "target_model_id": "balanced_bagging_3ds_reference",
+  "reason": "predictions are byte-identical to balanced_bagging_3ds_reference (SHA-256 verified)",
+  "source_artifact": "artifacts/balanced_bagging_firewall_tuned_ensemble_3dataset_DEGRADED",
+  "created_utc": "2026-05-26T07:57:32.235218+00:00",
+  "note": "Historical/degraded snapshot. Predictions duplicate the existing 3DS reference and the snapshot itself is not deployable.",
+  "supports_firewall_actions": false,
+  "supports_live_mode": false,
+  "deployable": false,
+  "warnings": [
+    "historical/degraded artifact; predictions duplicate existing 3DS reference; not deployable."
+  ]
+}

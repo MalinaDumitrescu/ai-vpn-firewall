@@ -1,0 +1,27 @@
+{
+  "model_id": "balanced_bagging_xgb_baseline",
+  "source_artifact": "artifacts/balanced_bagging_xgb",
+  "packaged_utc": "2026-05-26T07:57:32.235218+00:00",
+  "package_files": {
+    "model_card": "model_card.json",
+    "loader_config": "loader_config.json",
+    "feature_order": "feature_order.json",
+    "calibration_info": "calibration_info.json",
+    "thresholds": "thresholds.json",
+    "session_metrics": "session_metrics.json",
+    "policy_report": "policy_report.json"
+  },
+  "source_artifact_file_sha256": {
+    "isotonic_calibrator.pkl": "47a735e4da7a59c93cef7c07d3afbd4970fdfc5b0c315bbe1d862dd60fec58aa",
+    "metrics.json": "c3a1bdab6b6c19183e09862fcd2421ea996e80b77c25646efada6470b89cdbd9",
+    "model_xgb_bag0.pkl": "c1d00d762afff2085c651491d414c0dcbdb76b0b014c9504081e2bcf5db503f1",
+    "model_xgb_bag1.pkl": "cd60e0bcd7f05347017ce325fa0e822eec8d99dee2e45a57569000608c40f327",
+    "model_xgb_bag2.pkl": "eab3aff94945c1b0ff42774740c5fd758269d3cb92aa77057dd7b7b58b0e8dc6",
+    "platt_calibrator.pkl": "25a5aa09579a4db92aceb49be31c1c20b838811c18456098fd06c8faa399fb5b",
+    "predictions.csv": "f08a9da39ab17d69691ce9fd581e7f28b7b0fedffc730ba3c198ecb6d59243ad"
+  },
+  "policy_utils_version": {
+    "wt5_verified": true,
+    "wt5_source": "src/deployment/decision_engine.py::_wt5_agg"
+  }
+}
